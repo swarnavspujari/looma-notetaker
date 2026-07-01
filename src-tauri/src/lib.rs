@@ -2,6 +2,7 @@
 //! and wired to the UI. `looma-core` and the frontend never see an OS API.
 
 mod commands;
+mod recording;
 mod state;
 
 use tauri::Manager;
@@ -43,6 +44,13 @@ pub fn run() {
             commands::reveal_attachment,
             commands::reveal_data_dir,
             commands::search,
+            recording::recording_status,
+            recording::start_recording,
+            recording::pause_recording,
+            recording::resume_recording,
+            recording::stop_recording,
+            recording::get_meeting_for_note,
+            recording::list_mic_devices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Looma");

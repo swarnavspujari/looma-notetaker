@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub mod cpal_backend;
+pub mod mix;
 pub mod null;
 
 #[derive(Debug, thiserror::Error)]

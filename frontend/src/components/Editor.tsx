@@ -1,17 +1,29 @@
 import { useEffect, useRef, useState } from "react";
-import type { Folder, Note } from "../types";
+import type { Folder, Meeting, Note, RecordingStatus } from "../types";
 import { api } from "../api";
+import { fmtElapsed } from "./RecordingBar";
 
 interface Props {
   note: Note;
+  meeting: Meeting | null;
+  recStatus: RecordingStatus;
   folders: Folder[];
   onNoteChanged: (note: Note) => void;
   onMoveNote: (folderId: string | null) => void;
+  onStartRecording: () => void;
 }
 
 const URL_RE = /^https?:\/\/\S+$/;
 
-export default function Editor({ note, folders, onNoteChanged, onMoveNote }: Props) {
+export default function Editor({
+  note,
+  meeting,
+  recStatus,
+  folders,
+  onNoteChanged,
+  onMoveNote,
+  onStartRecording,
+}: Props) {
   const [title, setTitle] = useState(note.title);
   const [scratchpad, setScratchpad] = useState(note.scratchpad);
   const [saveState, setSaveState] = useState<"saved" | "saving">("saved");
@@ -91,6 +103,15 @@ export default function Editor({ note, folders, onNoteChanged, onMoveNote }: Pro
           className="flex-1 bg-transparent text-xl font-semibold text-zinc-100 outline-none placeholder:text-zinc-600"
           placeholder="Untitled"
         />
+        {!recStatus.active && (
+          <button
+            onClick={onStartRecording}
+            title="Record this meeting (mic + system audio)"
+            className="rounded-md bg-red-600/90 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-500"
+          >
+            ● Record
+          </button>
+        )}
         <select
           value={note.folder_id ?? ""}
           onChange={(e) => onMoveNote(e.target.value === "" ? null : e.target.value)}
@@ -108,6 +129,29 @@ export default function Editor({ note, folders, onNoteChanged, onMoveNote }: Pro
           {saveState === "saving" ? "saving…" : "saved"}
         </span>
       </div>
+
+      {meeting?.recording && (
+        <div className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-900/80 px-6 py-2 text-xs text-zinc-400">
+          <span>🎙 Meeting recording · {fmtElapsed(meeting.recording.duration_ms)}</span>
+          {meeting.recording.mixed_path && (
+            <button
+              className="text-indigo-300 hover:underline"
+              onClick={() => void api.openAttachment(meeting.recording!.mixed_path!)}
+            >
+              ▶ Play
+            </button>
+          )}
+          {meeting.recording.mic_path && (
+            <button
+              className="text-zinc-500 hover:text-zinc-300"
+              title="Reveal recording files"
+              onClick={() => void api.revealAttachment(meeting.recording!.mic_path!)}
+            >
+              📂 Files
+            </button>
+          )}
+        </div>
+      )}
 
       <textarea
         value={scratchpad}

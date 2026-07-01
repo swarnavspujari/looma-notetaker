@@ -51,3 +51,23 @@ Running log of technical decisions, newest last. Format: date — decision — w
   dir stays self-contained and portable (spec §10).
 - **2026-07-01 — react-hooks `set-state-in-effect` rule disabled.** Our effects fetch from the
   Tauri backend then set state — the standard desktop-app data flow the new rule over-flags.
+
+## M2 — Meeting recorder
+
+- **2026-07-01 — cpal loopback confirmed as primary path (no wasapi-crate fallback needed).**
+  cpal 0.18 transparently enables WASAPI loopback when an input stream is built on an output
+  device. Verified on real hardware: a 440 Hz tone played through the default output landed in
+  the system channel at RMS 0.43. The escape hatch (raw `wasapi` crate) was not needed.
+- **2026-07-01 — dedicated audio thread owns the streams.** cpal streams are !Send; the capture
+  session talks to an owning thread via channels (pause/resume/stop), which keeps
+  `Box<dyn CaptureSession>` Send for Tauri state.
+- **2026-07-01 — loopback silence-padding to a pause-aware clock.** WASAPI loopback delivers no
+  packets while the system is idle, which would silently compress the "them" channel's timeline
+  and desync it from the mic. Callbacks pad with zeros against a shared pause-aware clock
+  (>200 ms deficit) and the tail is padded at stop, so per-channel timelines stay wall-clock
+  aligned — a prerequisite for the M3 per-channel transcript merge (§6.4).
+- **2026-07-01 — channels recorded mono/native-rate; mixdown at 16 kHz.** Each channel is
+  downmixed to mono 16-bit at the device's native rate (archival + per-channel ASR); stop()
+  renders a 16 kHz mono mixed.wav (whisper's native input) with a dependency-free linear
+  resampler. Graceful degrade: if loopback can't build, recording continues mic-only with a
+  warning rather than failing the meeting.

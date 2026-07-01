@@ -2112,6 +2112,7 @@ name = "looma-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "dirs",
  "looma-asr",
  "looma-audio",
@@ -2152,6 +2153,7 @@ dependencies = [
  "hound",
  "looma-core",
  "serde",
+ "tempfile",
  "thiserror 2.0.18",
  "tracing",
 ]

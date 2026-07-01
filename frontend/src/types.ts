@@ -55,3 +55,28 @@ export interface AppInfo {
   version: string;
   data_dir: string;
 }
+
+export interface RecordingRef {
+  mic_path: string | null;
+  system_path: string | null;
+  mixed_path: string | null;
+  duration_ms: number;
+}
+
+export interface Meeting {
+  id: string;
+  title: string;
+  note_id: string;
+  attendees: string[];
+  started_at: string;
+  ended_at: string | null;
+  recording: RecordingRef | null;
+}
+
+export interface RecordingStatus {
+  active: boolean;
+  state: "recording" | "paused" | "stopped" | null;
+  elapsed_ms: number;
+  meeting_id: string | null;
+  note_id: string | null;
+}

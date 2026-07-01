@@ -11,6 +11,7 @@
 
 mod attachments;
 mod folders;
+mod meetings;
 mod notes;
 mod search;
 

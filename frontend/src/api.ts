@@ -2,7 +2,15 @@
 // invoke() directly — everything crosses this one seam.
 
 import { invoke } from "@tauri-apps/api/core";
-import type { AppInfo, Folder, Note, NoteSummary, SearchHit } from "./types";
+import type {
+  AppInfo,
+  Folder,
+  Meeting,
+  Note,
+  NoteSummary,
+  RecordingStatus,
+  SearchHit,
+} from "./types";
 
 export const api = {
   ping: () => invoke<string>("ping"),
@@ -40,4 +48,12 @@ export const api = {
 
   // search
   search: (query: string) => invoke<SearchHit[]>("search", { query }),
+
+  // recording
+  recordingStatus: () => invoke<RecordingStatus>("recording_status"),
+  startRecording: (noteId: string | null) => invoke<RecordingStatus>("start_recording", { noteId }),
+  pauseRecording: () => invoke<RecordingStatus>("pause_recording"),
+  resumeRecording: () => invoke<RecordingStatus>("resume_recording"),
+  stopRecording: () => invoke<Meeting>("stop_recording"),
+  getMeetingForNote: (noteId: string) => invoke<Meeting | null>("get_meeting_for_note", { noteId }),
 };
