@@ -78,6 +78,24 @@ Looma talks directly to Google/Microsoft — no middleman server — so you regi
 
 Tokens are stored in the Windows Credential Manager, never on disk.
 
+## Chat with your notes from Claude Desktop (MCP)
+
+Looma ships `looma-mcp.exe`, a local stdio MCP server over your notes, folders, meetings, and
+transcripts (read-only; nothing leaves the machine). Add it to Claude Desktop's
+`claude_desktop_config.json` — Looma → Settings → "Chat with your notes (MCP)" generates the
+exact snippet for your install location:
+
+```json
+{
+  "mcpServers": {
+    "looma": { "command": "C:\\path\\to\\looma-mcp.exe", "args": [] }
+  }
+}
+```
+
+Tools exposed: `search_notes`, `list_folders`, `get_note`, `get_transcript`, `get_meeting`,
+`list_recent`.
+
 ## Docs
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module boundaries and the porting story

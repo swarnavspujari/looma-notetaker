@@ -1,11 +1,45 @@
-//! looma-mcp: stdio MCP server exposing Looma notes, folders, and
-//! transcripts to external MCP clients (Claude Desktop etc.).
-//!
-//! The full JSON-RPC/MCP implementation lands in M6. This stub exists so the
-//! binary target builds from M0 onward; it announces itself and exits with a
-//! non-zero status so no client mistakes it for a working server yet.
+//! stdio entrypoint: newline-delimited JSON-RPC over stdin/stdout.
+//! Usage: looma-mcp [--data-dir <path>]   (defaults to the app's data dir)
 
-fn main() {
-    eprintln!("looma-mcp: the MCP server ships in milestone M6; this build is a placeholder.");
-    std::process::exit(2);
+use std::io::{BufRead, Write};
+
+use looma_mcp::Server;
+
+fn main() -> anyhow::Result<()> {
+    let mut data_dir = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("Looma");
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--data-dir" {
+            if let Some(dir) = args.next() {
+                data_dir = std::path::PathBuf::from(dir);
+            }
+        }
+    }
+
+    let storage = looma_storage::Storage::open(&data_dir)?;
+    let server = Server::new(storage);
+    // logs must go to stderr — stdout is the protocol channel
+    eprintln!(
+        "looma-mcp v{} serving {}",
+        looma_mcp::SERVER_VERSION,
+        data_dir.display()
+    );
+
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    for line in stdin.lock().lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        if let Some(response) = server.handle_message(&line) {
+            let mut out = stdout.lock();
+            out.write_all(response.as_bytes())?;
+            out.write_all(b"\n")?;
+            out.flush()?;
+        }
+    }
+    Ok(())
 }
