@@ -1,10 +1,110 @@
+/* Bundled locally so the app stays fully offline (no font CDN). */
+@import "@fontsource/spline-sans/400.css";
+@import "@fontsource/spline-sans/500.css";
+@import "@fontsource/spline-sans/600.css";
+@import "@fontsource/spline-sans/700.css";
+@import "@fontsource/bricolage-grotesque/400.css";
+@import "@fontsource/bricolage-grotesque/600.css";
+@import "@fontsource/bricolage-grotesque/700.css";
 @import "tailwindcss";
 
+/* Looma design system — warm cream/coral language from the Claude design export
+   (design/Looma.dc.html). Every surface color, type style and border in the app
+   should come from these tokens. */
+@theme {
+  --font-sans: "Spline Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Bricolage Grotesque", "Spline Sans", system-ui, sans-serif;
+
+  --color-cream: #faf6f1; /* app background */
+  --color-surface: #ffffff; /* cards, editor, panels */
+  --color-shell: #f2eae0; /* window chrome: sidebar, bars */
+  --color-peach: #fbeadf; /* selected / hover fills, AI tint */
+  --color-peach-2: #fdf3ec; /* subtle fills */
+  --color-coral: #e86a4a; /* accent */
+  --color-clay: #a64a2e; /* accent text on peach */
+  --color-ink: #2a2320; /* primary text */
+  --color-ink-2: #5c524b; /* secondary text */
+  --color-mute: #94897f; /* tertiary text */
+  --color-line: rgba(60, 40, 30, 0.1); /* borders */
+  --color-line-2: rgba(60, 40, 30, 0.05); /* hairlines */
+  --color-rec: #e23b3b; /* live recording */
+
+  /* speaker rotation (mic/self is always coral) */
+  --color-spk-teal: #2fa39a;
+  --color-spk-violet: #7a6ce0;
+  --color-spk-blue: #3e7be0;
+  --color-spk-amber: #e0912f;
+  --color-spk-pink: #d4589e;
+  --color-spk-green: #5b8a3c;
+
+  --shadow-warm: 0 24px 60px -18px rgba(70, 34, 16, 0.35), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-card: 0 1px 2px rgba(60, 40, 30, 0.05);
+}
+
 :root {
-  font-family:
-    "Segoe UI Variable Text",
-    "Segoe UI",
-    system-ui,
-    -apple-system,
-    sans-serif;
+  font-family: var(--font-sans);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-cream);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #f8d8c6;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(60, 40, 30, 0.16);
+  border-radius: 9px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(60, 40, 30, 0.28);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
 }

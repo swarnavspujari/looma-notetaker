@@ -296,7 +296,7 @@ export default function App() {
       : null;
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
+    <div className="flex h-screen flex-col bg-shell font-sans text-ink">
       <RecordingBar
         status={recStatus}
         noteTitle={recordingNoteTitle}
@@ -359,27 +359,38 @@ export default function App() {
             onRelabel={(k, l) => void relabel(k, l)}
           />
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-zinc-900 text-zinc-600">
+          <div className="flex flex-1 flex-col items-center justify-center gap-5 bg-surface text-mute">
             <div className="text-center">
-              <div className="text-4xl font-semibold tracking-tight text-zinc-700">Looma</div>
-              <div className="mt-2 text-sm">Select a note, create one, or start recording.</div>
+              <div className="flex items-center justify-center gap-3">
+                <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-coral">
+                  <span className="h-4 w-4 rounded-full border-[3px] border-white" />
+                </span>
+                <span className="font-display text-4xl font-bold tracking-tight text-ink">
+                  Looma
+                </span>
+              </div>
+              <div className="mt-3 text-sm text-ink-2">
+                Select a note, create one, or start recording.
+              </div>
             </div>
             {!recStatus.active && (
               <button
                 onClick={() => void startRecording()}
-                className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500"
+                className="inline-flex cursor-pointer items-center gap-2.5 rounded-xl bg-coral px-5 py-3 text-sm font-semibold text-white transition-[filter] hover:brightness-105"
               >
-                ● Record a meeting
+                <span className="h-3 w-3 rounded-full bg-white" /> Start a meeting
               </button>
             )}
           </div>
         )}
       </div>
-      <footer className="flex items-center justify-between border-t border-zinc-800 bg-zinc-950 px-4 py-1.5 text-xs text-zinc-600">
-        <span>{error ? `⚠ ${error}` : "local-first · offline capable"}</span>
+      <footer className="flex items-center justify-between border-t border-line bg-shell px-4 py-1.5 text-xs text-mute">
+        <span className={error ? "font-medium text-clay" : undefined}>
+          {error ? `⚠ ${error}` : "local-first · offline capable"}
+        </span>
         {info && (
           <button
-            className="hover:text-zinc-300"
+            className="cursor-pointer hover:text-ink"
             title="Reveal data folder in Explorer"
             onClick={() => void api.revealDataDir()}
           >
