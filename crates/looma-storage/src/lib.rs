@@ -14,6 +14,8 @@ mod folders;
 mod meetings;
 mod notes;
 mod search;
+mod settings;
+mod transcripts;
 
 pub use notes::NoteSummary;
 pub use search::{SearchHit, SearchHitKind};
@@ -107,6 +109,11 @@ impl Storage {
                 system_prompt  TEXT NOT NULL,
                 structure_hint TEXT NOT NULL,
                 built_in       INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );
 
             -- Full-text search. Kept in sync by the write paths in this crate.

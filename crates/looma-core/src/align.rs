@@ -70,6 +70,31 @@ pub fn align_words_to_speakers(
     segments
 }
 
+/// Group a single known speaker's words into pause-separated segments —
+/// used for the mic channel, where the speaker is you by construction
+/// (spec §6.4) and no diarization is needed.
+pub fn segments_from_single_speaker(
+    words: &[Word],
+    speaker_key: &str,
+    opts: &AlignOptions,
+) -> Vec<TranscriptSegment> {
+    let all = [SpeakerTurn {
+        speaker_key: speaker_key.to_string(),
+        start_ms: 0,
+        end_ms: words.last().map(|w| w.end_ms + 1).unwrap_or(1),
+    }];
+    align_words_to_speakers(words, &all, opts)
+}
+
+/// Interleave the per-channel segment lists (mic = you, system = them) into
+/// one meeting timeline. Channels were recorded against the same pause-aware
+/// clock, so start timestamps are directly comparable.
+pub fn merge_channel_segments(mut channels: Vec<Vec<TranscriptSegment>>) -> Vec<TranscriptSegment> {
+    let mut merged: Vec<TranscriptSegment> = channels.drain(..).flatten().collect();
+    merged.sort_by_key(|s| (s.start_ms, s.end_ms));
+    merged
+}
+
 fn speaker_for(word: &Word, turns: &[SpeakerTurn], opts: &AlignOptions) -> String {
     let mut best: Option<(&SpeakerTurn, u64)> = None;
     for turn in turns {
@@ -181,5 +206,36 @@ mod tests {
     fn empty_inputs_produce_empty_output() {
         let segs = align_words_to_speakers(&[], &[], &AlignOptions::default());
         assert!(segs.is_empty());
+    }
+
+    #[test]
+    fn single_speaker_channel_segments_by_pause() {
+        let words = vec![
+            w("hello", 0, 300),
+            w("there", 350, 600),
+            w("again", 9_000, 9_300),
+        ];
+        let segs = segments_from_single_speaker(&words, "mic", &AlignOptions::default());
+        assert_eq!(segs.len(), 2);
+        assert!(segs.iter().all(|s| s.speaker_key == "mic"));
+        assert_eq!(segs[0].text, "hello there");
+        assert_eq!(segs[1].text, "again");
+    }
+
+    #[test]
+    fn merge_interleaves_channels_by_time() {
+        let mic = segments_from_single_speaker(
+            &[w("question", 0, 500), w("answer follow-up", 4_000, 4_500)],
+            "mic",
+            &AlignOptions::default(),
+        );
+        let them = segments_from_single_speaker(
+            &[w("reply", 1_000, 1_500)],
+            "spk_0",
+            &AlignOptions::default(),
+        );
+        let merged = merge_channel_segments(vec![mic, them]);
+        let speakers: Vec<&str> = merged.iter().map(|s| s.speaker_key.as_str()).collect();
+        assert_eq!(speakers, vec!["mic", "spk_0", "mic"]);
     }
 }

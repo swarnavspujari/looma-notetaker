@@ -10,6 +10,7 @@ interface Props {
   onCreateFolder: (name: string, parentId: string | null) => void;
   onRenameFolder: (id: string, name: string) => void;
   onDeleteFolder: (id: string) => void;
+  onOpenSettings: () => void;
 }
 
 interface TreeNode {
@@ -40,6 +41,7 @@ export default function Sidebar({
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
+  onOpenSettings,
 }: Props) {
   const tree = useMemo(() => buildTree(folders), [folders]);
   const [newFolderParent, setNewFolderParent] = useState<string | null | "none">("none");
@@ -192,6 +194,12 @@ export default function Sidebar({
         )}
         <div className="mt-1">{tree.map((n) => renderNode(n, 0))}</div>
       </nav>
+      <button
+        onClick={onOpenSettings}
+        className="flex items-center gap-2 border-t border-zinc-800 px-4 py-2.5 text-left text-sm text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+      >
+        ⚙ Settings
+      </button>
     </div>
   );
 }

@@ -80,3 +80,82 @@ export interface RecordingStatus {
   meeting_id: string | null;
   note_id: string | null;
 }
+
+export interface Word {
+  text: string;
+  start_ms: number;
+  end_ms: number;
+}
+
+export interface TranscriptSegment {
+  id: string;
+  speaker_key: string;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+  words: Word[];
+}
+
+export interface Speaker {
+  key: string;
+  label: string;
+}
+
+export interface Transcript {
+  meeting_id: string;
+  language: string | null;
+  engine: string;
+  segments: TranscriptSegment[];
+  speakers: Speaker[];
+}
+
+export interface PipelineProgress {
+  meeting_id: string;
+  stage: string;
+  detail: string | null;
+  done: boolean;
+  error: string | null;
+}
+
+export interface ModelProgress {
+  id: string;
+  downloaded: number;
+  total: number;
+  stage: "downloading" | "verifying" | "extracting" | "done" | "error";
+  error: string | null;
+}
+
+export interface HwInfo {
+  ram_gb: number;
+  cpu_cores: number;
+  gpu_name: string | null;
+  vram_mb: number | null;
+  recommended_tier: string;
+}
+
+export interface ModelStatus {
+  id: string;
+  display: string;
+  bytes: number;
+  installed: boolean;
+}
+
+export interface AsrSettings {
+  tier: string;
+  model_id: string | null;
+  use_groq: boolean;
+  max_quality: boolean;
+  has_groq_key: boolean;
+  auto_transcribe: boolean;
+  hw: HwInfo;
+  models: ModelStatus[];
+}
+
+export interface AsrSettingsUpdate {
+  tier: string;
+  model_id: string | null;
+  use_groq: boolean;
+  max_quality: boolean;
+  auto_transcribe: boolean;
+  groq_key: string | null;
+}

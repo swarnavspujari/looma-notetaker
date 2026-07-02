@@ -71,3 +71,28 @@ Running log of technical decisions, newest last. Format: date — decision — w
   renders a 16 kHz mono mixed.wav (whisper's native input) with a dependency-free linear
   resampler. Graceful degrade: if loopback can't build, recording continues mic-only with a
   warning rather than failing the meeting.
+
+## M3 — Transcription + diarization
+
+- **2026-07-01 — Sidecar binaries first (spec escape hatch), taken deliberately.**
+  whisper-cli.exe (whisper.cpp v1.9.1 release zip) and
+  sherpa-onnx-offline-speaker-diarization.exe (v1.13.3) are downloaded per-machine with SHA-256
+  verification and spawned with CREATE_NO_WINDOW. In-process bindings (whisper-rs, sherpa-onnx
+  Rust API) remain a later refinement; the CLI contract is proven by the golden E2E test.
+  Bonus: the same whisper.cpp zip ships parakeet-cli.exe, giving a cheap future Parakeet engine.
+- **2026-07-01 — Word timestamps via `-ml 1 -sow -oj`.** whisper-cli emits one word per JSON
+  entry with millisecond offsets — exactly what the aligner needs; no token-level DTW parsing.
+- **2026-07-01 — Checksums pinned from upstream metadata.** GitHub release asset `digest` fields
+  and HF LFS `oid` values, cross-verified by hashing the actual downloads locally. The two
+  sherpa model assets predate GitHub digests and were pinned from local hashes.
+- **2026-07-01 — Balanced tier defaults to large-v3-turbo-q5_0, not medium.** Turbo beats medium
+  on accuracy at comparable CPU cost and is the spec's named sweet spot; medium stays in the
+  dropdown. Max-quality toggle selects large-v3-q5_0 (~1 GB) rather than the 3 GB f16.
+- **2026-07-01 — Pipeline core is tauri-free.** `pipeline::run_with` + `models::ensure` take
+  progress-sink callbacks; the Tauri layer bridges them to events. Chosen after
+  `tauri::test::mock_app` test exes died with STATUS_ENTRYPOINT_NOT_FOUND on Windows — and it is
+  better layering anyway: the golden E2E test drives the real pipeline with zero webview.
+- **2026-07-01 — Golden sample is generated Windows-TTS audio.** Two SAPI voices (David/Zira)
+  reading a scripted 27.5 s meeting — license-clear by construction, committed as a fixture.
+  Measured: WER 5.4 % (whisper small-q5), 2 speakers cleanly separated, correct attribution;
+  the E2E test enforces WER < 25 % and exact speaker-count/attribution.

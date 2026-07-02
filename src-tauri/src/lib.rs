@@ -1,9 +1,13 @@
 //! Composition root: this is the ONLY place where platform impls are picked
 //! and wired to the UI. `looma-core` and the frontend never see an OS API.
 
+mod asr_commands;
 mod commands;
+pub mod hw;
+pub mod models;
+pub mod pipeline;
 mod recording;
-mod state;
+pub mod state;
 
 use tauri::Manager;
 
@@ -51,6 +55,13 @@ pub fn run() {
             recording::stop_recording,
             recording::get_meeting_for_note,
             recording::list_mic_devices,
+            asr_commands::transcribe_meeting,
+            asr_commands::get_transcript,
+            asr_commands::relabel_speaker,
+            asr_commands::pipeline_stage,
+            asr_commands::get_asr_settings,
+            asr_commands::set_asr_settings,
+            asr_commands::download_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Looma");

@@ -9,9 +9,13 @@
     assumption), and — from M1 — folder ops, note CRUD, search indexing.
   - `looma-secrets`: in-memory store roundtrip (keychain impl is exercised manually — CI runners
     have no unlocked keychain).
-- **Golden transcription/diarization sample** *(lands with M3)*: a short license-clear
-  multi-speaker clip + expected diarized transcript; asserts WER and speaker-attribution error
-  stay within tolerance when engines/models change.
+- **Golden transcription/diarization sample** (`src-tauri/tests/pipeline_e2e.rs`): a committed
+  two-voice Windows-TTS clip (license-clear by construction) runs through the REAL pipeline —
+  whisper.cpp sidecar → sherpa-onnx diarization → aligner → storage. Asserts WER < 25 %
+  (measured: 5.4 %), exactly 2 speakers, correct line attribution, and searchable persistence.
+  Heavy + needs downloaded artifacts, so it's `#[ignore]`d in CI; run locally with:
+  `cargo test -p looma-app --test pipeline_e2e -- --ignored --nocapture`
+  (artifacts are hardlinked from `%APPDATA%/Looma`; the test skips if absent).
 - **Integration test** *(lands with M4)*: record→transcribe→diarize→enhance over a fixture
   recording with the deterministic `MockLLMProvider` — fully offline.
 - **MCP test** *(lands with M6)*: spawn the stdio server, assert `search_notes`/`get_note`

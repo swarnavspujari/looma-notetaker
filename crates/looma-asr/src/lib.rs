@@ -7,6 +7,9 @@
 //!   so). Returns no speaker labels; diarization always runs locally
 //!   regardless (spec §6.3).
 
+pub mod groq;
+pub mod whisper_cpp;
+
 use std::path::Path;
 
 use looma_core::Word;

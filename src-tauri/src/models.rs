@@ -1,0 +1,291 @@
+//! Artifact manager: sidecar binaries and model weights, downloaded on first
+//! use into the data dir with streaming progress + SHA-256 verification.
+//! Nothing here is ever bundled in git or the installer (docs/MODELS.md).
+
+use std::path::{Path, PathBuf};
+
+use futures_util::StreamExt;
+use sha2::{Digest, Sha256};
+
+/// Progress sink — the tauri layer forwards these to `model:progress`
+/// events; tests pass a no-op.
+pub type ProgressSink<'a> = &'a (dyn Fn(ModelProgress) + Send + Sync);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArtifactKind {
+    /// Single file stored at `dest_rel`.
+    File,
+    /// Archive extracted into `dest_rel`; `probe_rel` proves extraction.
+    Archive,
+}
+
+pub struct Artifact {
+    pub id: &'static str,
+    pub display: &'static str,
+    pub url: &'static str,
+    pub sha256: &'static str,
+    pub bytes: u64,
+    pub kind: ArtifactKind,
+    /// Destination (file path or extraction dir), relative to the data dir.
+    pub dest_rel: &'static str,
+    /// For archives: file inside dest that proves a complete install and is
+    /// the path callers actually want. For files: same as dest_rel.
+    pub probe_rel: &'static str,
+}
+
+/// Everything Looma can download. Checksums pinned from upstream release
+/// digests / HF LFS metadata, re-verified locally on 2026-07-01.
+pub const REGISTRY: &[Artifact] = &[
+    Artifact {
+        id: "whisper-bin",
+        display: "whisper.cpp CLI (CPU, v1.9.1)",
+        url: "https://github.com/ggml-org/whisper.cpp/releases/download/v1.9.1/whisper-bin-x64.zip",
+        sha256: "7d8be46ecd31828e1eb7a2ecdd0d6b314feafd82163038ab6092594b0a063539",
+        bytes: 7_982_101,
+        kind: ArtifactKind::Archive,
+        dest_rel: "bin/whisper",
+        probe_rel: "bin/whisper/Release/whisper-cli.exe",
+    },
+    Artifact {
+        id: "sherpa-bin",
+        display: "sherpa-onnx diarization CLI (v1.13.3)",
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.3/sherpa-onnx-v1.13.3-win-x64-shared-MD-Release.tar.bz2",
+        sha256: "6491877a599a4c5a33e5568c8a22f86fc376dc25a2bc49b95373bbf0dd0a12c8",
+        bytes: 19_413_897,
+        kind: ArtifactKind::Archive,
+        dest_rel: "bin/sherpa",
+        probe_rel: "bin/sherpa/sherpa-onnx-v1.13.3-win-x64-shared-MD-Release/bin/sherpa-onnx-offline-speaker-diarization.exe",
+    },
+    Artifact {
+        id: "pyannote-seg",
+        display: "pyannote segmentation 3.0 (ONNX)",
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+        sha256: "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
+        bytes: 6_958_444,
+        kind: ArtifactKind::Archive,
+        dest_rel: "models/diarize",
+        probe_rel: "models/diarize/sherpa-onnx-pyannote-segmentation-3-0/model.onnx",
+    },
+    Artifact {
+        id: "campplus-embedding",
+        display: "3D-Speaker CAM++ speaker embedding (ONNX)",
+        url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+        sha256: "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2",
+        bytes: 28_281_164,
+        kind: ArtifactKind::File,
+        dest_rel: "models/diarize/campplus.onnx",
+        probe_rel: "models/diarize/campplus.onnx",
+    },
+    Artifact {
+        id: "ggml-small-q5_1",
+        display: "Whisper small (Q5, ~190 MB) — Light tier",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin",
+        sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
+        bytes: 190_085_487,
+        kind: ArtifactKind::File,
+        dest_rel: "models/asr/ggml-small-q5_1.bin",
+        probe_rel: "models/asr/ggml-small-q5_1.bin",
+    },
+    Artifact {
+        id: "ggml-medium-q5_0",
+        display: "Whisper medium (Q5, ~540 MB)",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin",
+        sha256: "19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f",
+        bytes: 539_212_467,
+        kind: ArtifactKind::File,
+        dest_rel: "models/asr/ggml-medium-q5_0.bin",
+        probe_rel: "models/asr/ggml-medium-q5_0.bin",
+    },
+    Artifact {
+        id: "ggml-large-v3-turbo-q5_0",
+        display: "Whisper large-v3-turbo (Q5, ~574 MB) — Balanced/Best default",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
+        sha256: "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+        bytes: 574_041_195,
+        kind: ArtifactKind::File,
+        dest_rel: "models/asr/ggml-large-v3-turbo-q5_0.bin",
+        probe_rel: "models/asr/ggml-large-v3-turbo-q5_0.bin",
+    },
+    Artifact {
+        id: "ggml-large-v3-q5_0",
+        display: "Whisper large-v3 (Q5, ~1 GB) — maximum quality",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",
+        sha256: "d75795ecff3f83b5faa89d1900604ad8c780abd5739fae406de19f23ecd98ad1",
+        bytes: 1_081_140_203,
+        kind: ArtifactKind::File,
+        dest_rel: "models/asr/ggml-large-v3-q5_0.bin",
+        probe_rel: "models/asr/ggml-large-v3-q5_0.bin",
+    },
+];
+
+pub fn artifact(id: &str) -> Option<&'static Artifact> {
+    REGISTRY.iter().find(|a| a.id == id)
+}
+
+pub fn installed_path(data_dir: &Path, a: &Artifact) -> Option<PathBuf> {
+    let probe = data_dir.join(a.probe_rel);
+    probe.exists().then_some(probe)
+}
+
+#[derive(Clone, serde::Serialize)]
+pub struct ModelProgress {
+    pub id: String,
+    pub downloaded: u64,
+    pub total: u64,
+    pub stage: String, // downloading | verifying | extracting | done | error
+    pub error: Option<String>,
+}
+
+/// Ensure an artifact is installed; returns the probe path. Reports
+/// progress through the sink while downloading/extracting.
+pub async fn ensure(
+    progress: ProgressSink<'_>,
+    data_dir: &Path,
+    id: &str,
+) -> Result<PathBuf, String> {
+    let a = artifact(id).ok_or_else(|| format!("unknown artifact {id}"))?;
+    if let Some(path) = installed_path(data_dir, a) {
+        return Ok(path);
+    }
+
+    let tmp = data_dir.join(format!("{}.download", a.id));
+    if let Some(parent) = tmp.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    // ---- download with streaming progress ----
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(a.url)
+        .send()
+        .await
+        .map_err(|e| format!("download failed: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("download failed: {e}"))?;
+    let total = resp.content_length().unwrap_or(a.bytes);
+
+    let mut hasher = Sha256::new();
+    let mut file = tokio::fs::File::create(&tmp)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut stream = resp.bytes_stream();
+    let mut downloaded: u64 = 0;
+    let mut last_emit = std::time::Instant::now();
+    use tokio::io::AsyncWriteExt;
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("download interrupted: {e}"))?;
+        hasher.update(&chunk);
+        file.write_all(&chunk).await.map_err(|e| e.to_string())?;
+        downloaded += chunk.len() as u64;
+        if last_emit.elapsed().as_millis() > 200 {
+            progress(ModelProgress {
+                id: a.id.into(),
+                downloaded,
+                total,
+                stage: "downloading".into(),
+                error: None,
+            });
+            last_emit = std::time::Instant::now();
+        }
+    }
+    file.flush().await.map_err(|e| e.to_string())?;
+    drop(file);
+
+    // ---- checksum ----
+    progress(ModelProgress {
+        id: a.id.into(),
+        downloaded,
+        total,
+        stage: "verifying".into(),
+        error: None,
+    });
+    let digest = hex::encode(hasher.finalize());
+    if digest != a.sha256 {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        let msg = format!(
+            "checksum mismatch for {} (expected {}, got {digest})",
+            a.id, a.sha256
+        );
+        progress(ModelProgress {
+            id: a.id.into(),
+            downloaded,
+            total,
+            stage: "error".into(),
+            error: Some(msg.clone()),
+        });
+        return Err(msg);
+    }
+
+    // ---- install ----
+    let dest = data_dir.join(a.dest_rel);
+    match a.kind {
+        ArtifactKind::File => {
+            if let Some(parent) = dest.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            tokio::fs::rename(&tmp, &dest)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        ArtifactKind::Archive => {
+            progress(ModelProgress {
+                id: a.id.into(),
+                downloaded,
+                total,
+                stage: "extracting".into(),
+                error: None,
+            });
+            tokio::fs::create_dir_all(&dest)
+                .await
+                .map_err(|e| e.to_string())?;
+            extract_archive(&tmp, &dest).await?;
+            let _ = tokio::fs::remove_file(&tmp).await;
+        }
+    }
+
+    let probe = data_dir.join(a.probe_rel);
+    if !probe.exists() {
+        return Err(format!(
+            "artifact {} installed but expected file missing: {}",
+            a.id,
+            probe.display()
+        ));
+    }
+    progress(ModelProgress {
+        id: a.id.into(),
+        downloaded,
+        total,
+        stage: "done".into(),
+        error: None,
+    });
+    Ok(probe)
+}
+
+/// Extract zip/tar.bz2 with the system bsdtar (ships with Windows 10+ and
+/// handles both formats).
+async fn extract_archive(archive: &Path, dest: &Path) -> Result<(), String> {
+    let tar = if cfg!(windows) {
+        r"C:\Windows\System32\tar.exe"
+    } else {
+        "tar"
+    };
+    let out = tokio::process::Command::new(tar)
+        .arg("-xf")
+        .arg(archive)
+        .arg("-C")
+        .arg(dest)
+        .output()
+        .await
+        .map_err(|e| format!("failed to run tar: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "extraction failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}

@@ -28,6 +28,7 @@ recordings/
 *.mp4
 *.mkv
 !crates/**/fixtures/**/*.wav
+!src-tauri/fixtures/*.wav
 
 # os / editor
 .DS_Store

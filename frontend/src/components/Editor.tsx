@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import type { Folder, Meeting, Note, RecordingStatus } from "../types";
+import type { Folder, Meeting, ModelProgress, Note, RecordingStatus, Transcript } from "../types";
 import { api } from "../api";
 import { fmtElapsed } from "./RecordingBar";
+import TranscriptPanel from "./TranscriptPanel";
 
 interface Props {
   note: Note;
   meeting: Meeting | null;
+  transcript: Transcript | null;
+  pipeStage: string | null;
+  pipelineError: string | null;
+  modelProgress: ModelProgress | null;
   recStatus: RecordingStatus;
   folders: Folder[];
   onNoteChanged: (note: Note) => void;
   onMoveNote: (folderId: string | null) => void;
   onStartRecording: () => void;
+  onTranscribe: () => void;
+  onRelabel: (speakerKey: string, label: string) => void;
 }
 
 const URL_RE = /^https?:\/\/\S+$/;
@@ -18,11 +25,17 @@ const URL_RE = /^https?:\/\/\S+$/;
 export default function Editor({
   note,
   meeting,
+  transcript,
+  pipeStage,
+  pipelineError,
+  modelProgress,
   recStatus,
   folders,
   onNoteChanged,
   onMoveNote,
   onStartRecording,
+  onTranscribe,
+  onRelabel,
 }: Props) {
   const [title, setTitle] = useState(note.title);
   const [scratchpad, setScratchpad] = useState(note.scratchpad);
@@ -151,6 +164,18 @@ export default function Editor({
             </button>
           )}
         </div>
+      )}
+
+      {meeting && (
+        <TranscriptPanel
+          meeting={meeting}
+          transcript={transcript}
+          stage={pipeStage}
+          modelProgress={modelProgress}
+          pipelineError={pipelineError}
+          onTranscribe={onTranscribe}
+          onRelabel={onRelabel}
+        />
       )}
 
       <textarea

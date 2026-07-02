@@ -1,10 +1,12 @@
 //! Long-lived app state managed by Tauri.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use looma_audio::cpal_backend::CpalAudioCapture;
 use looma_audio::AudioCapture;
+use looma_secrets::{KeychainSecretStore, SecretStore};
 use looma_storage::Storage;
 
 use crate::recording::ActiveRecording;
@@ -18,11 +20,19 @@ pub struct AppState {
     pub audio: Box<dyn AudioCapture>,
     /// At most one capture session at a time.
     pub recording: Mutex<Option<ActiveRecording>>,
+    /// OS keychain — every API key/token goes through this, never plaintext.
+    pub secrets: Box<dyn SecretStore>,
+    /// meeting_id → current pipeline stage, for running transcriptions.
+    pub pipeline_stage: Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
     pub fn init() -> anyhow::Result<Self> {
-        let data_dir = default_data_dir();
+        Self::init_with(default_data_dir(), Box::new(KeychainSecretStore::new()))
+    }
+
+    /// Composition with explicit data dir + secret store — used by tests.
+    pub fn init_with(data_dir: PathBuf, secrets: Box<dyn SecretStore>) -> anyhow::Result<Self> {
         let storage = Storage::open(&data_dir)?;
         tracing::info!(dir = %data_dir.display(), "storage ready");
         Ok(Self {
@@ -30,6 +40,8 @@ impl AppState {
             data_dir,
             audio: Box::new(CpalAudioCapture::new()),
             recording: Mutex::new(None),
+            secrets,
+            pipeline_stage: Mutex::new(HashMap::new()),
         })
     }
 }

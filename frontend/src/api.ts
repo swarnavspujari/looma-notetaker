@@ -4,12 +4,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AppInfo,
+  AsrSettings,
+  AsrSettingsUpdate,
   Folder,
   Meeting,
   Note,
   NoteSummary,
   RecordingStatus,
   SearchHit,
+  Transcript,
 } from "./types";
 
 export const api = {
@@ -56,4 +59,16 @@ export const api = {
   resumeRecording: () => invoke<RecordingStatus>("resume_recording"),
   stopRecording: () => invoke<Meeting>("stop_recording"),
   getMeetingForNote: (noteId: string) => invoke<Meeting | null>("get_meeting_for_note", { noteId }),
+
+  // transcription
+  transcribeMeeting: (meetingId: string) => invoke<void>("transcribe_meeting", { meetingId }),
+  getTranscript: (meetingId: string) => invoke<Transcript | null>("get_transcript", { meetingId }),
+  relabelSpeaker: (meetingId: string, speakerKey: string, label: string) =>
+    invoke<Transcript>("relabel_speaker", { meetingId, speakerKey, label }),
+  pipelineStage: (meetingId: string) => invoke<string | null>("pipeline_stage", { meetingId }),
+
+  // ASR settings & models
+  getAsrSettings: () => invoke<AsrSettings>("get_asr_settings"),
+  setAsrSettings: (update: AsrSettingsUpdate) => invoke<void>("set_asr_settings", { update }),
+  downloadModel: (id: string) => invoke<string>("download_model", { id }),
 };

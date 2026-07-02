@@ -5,6 +5,8 @@
 //! light enough for phones, so "who said what" never depends on the network
 //! (spec §6.3). The word↔speaker aligner itself lives in looma-core.
 
+pub mod sherpa;
+
 use std::path::Path;
 
 use looma_core::SpeakerTurn;

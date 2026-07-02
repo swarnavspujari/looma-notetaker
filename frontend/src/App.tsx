@@ -1,18 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import type {
   AppInfo,
   Folder,
   Meeting,
+  ModelProgress,
   Note,
   NoteSummary,
+  PipelineProgress,
   RecordingStatus,
   SearchHit,
+  Transcript,
 } from "./types";
 import Sidebar, { type Selection } from "./components/Sidebar";
 import NoteList from "./components/NoteList";
 import Editor from "./components/Editor";
 import RecordingBar from "./components/RecordingBar";
+import SettingsModal from "./components/SettingsModal";
 
 const IDLE_STATUS: RecordingStatus = {
   active: false,
@@ -29,10 +34,21 @@ export default function App() {
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [openNote, setOpenNote] = useState<Note | null>(null);
   const [openMeeting, setOpenMeeting] = useState<Meeting | null>(null);
+  const [transcript, setTranscript] = useState<Transcript | null>(null);
+  const [pipeStage, setPipeStage] = useState<string | null>(null);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [modelProgress, setModelProgress] = useState<ModelProgress | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [recStatus, setRecStatus] = useState<RecordingStatus>(IDLE_STATUS);
+  const [autoTranscribe, setAutoTranscribe] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const openMeetingIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    openMeetingIdRef.current = openMeeting?.id ?? null;
+  }, [openMeeting]);
 
   const refreshFolders = useCallback(async () => {
     setFolders(await api.listFolders());
@@ -54,6 +70,10 @@ export default function App() {
       .then(setInfo)
       .catch((e) => setError(String(e)));
     refreshFolders().catch((e) => setError(String(e)));
+    api
+      .getAsrSettings()
+      .then((s) => setAutoTranscribe(s.auto_transcribe))
+      .catch(console.error);
   }, [refreshFolders]);
 
   useEffect(() => {
@@ -66,6 +86,29 @@ export default function App() {
       api.recordingStatus().then(setRecStatus).catch(console.error);
     }, 1000);
     return () => window.clearInterval(t);
+  }, []);
+
+  // pipeline + model download progress events
+  useEffect(() => {
+    const unPipeline = listen<PipelineProgress>("pipeline:progress", (e) => {
+      const p = e.payload;
+      if (p.meeting_id !== openMeetingIdRef.current) return;
+      if (p.done) {
+        setPipeStage(null);
+        setPipelineError(p.error);
+        if (!p.error) {
+          api.getTranscript(p.meeting_id).then(setTranscript).catch(console.error);
+        }
+      } else {
+        setPipeStage(p.stage);
+        setPipelineError(null);
+      }
+    });
+    const unModel = listen<ModelProgress>("model:progress", (e) => setModelProgress(e.payload));
+    return () => {
+      void unPipeline.then((f) => f());
+      void unModel.then((f) => f());
+    };
   }, []);
 
   // debounce search-as-you-type
@@ -84,7 +127,16 @@ export default function App() {
   const openNoteById = useCallback(async (id: string) => {
     const note = await api.getNote(id);
     setOpenNote(note);
-    setOpenMeeting(await api.getMeetingForNote(id));
+    const meeting = await api.getMeetingForNote(id);
+    setOpenMeeting(meeting);
+    setPipelineError(null);
+    if (meeting) {
+      setTranscript(await api.getTranscript(meeting.id));
+      setPipeStage(await api.pipelineStage(meeting.id));
+    } else {
+      setTranscript(null);
+      setPipeStage(null);
+    }
   }, []);
 
   const newNote = async () => {
@@ -93,6 +145,8 @@ export default function App() {
     await refreshNotes();
     setOpenNote(note);
     setOpenMeeting(null);
+    setTranscript(null);
+    setPipeStage(null);
   };
 
   const deleteNote = async (id: string) => {
@@ -100,6 +154,7 @@ export default function App() {
     if (openNote?.id === id) {
       setOpenNote(null);
       setOpenMeeting(null);
+      setTranscript(null);
     }
     await refreshNotes();
   };
@@ -139,9 +194,28 @@ export default function App() {
         setOpenMeeting(meeting);
       }
       await refreshNotes();
+      if (autoTranscribe) {
+        await api.transcribeMeeting(meeting.id);
+        if (openNote?.id === meeting.note_id) {
+          setPipeStage("starting");
+          setPipelineError(null);
+        }
+      }
     } catch (e) {
       setError(String(e));
     }
+  };
+
+  const transcribeNow = async () => {
+    if (!openMeeting) return;
+    setPipelineError(null);
+    setPipeStage("starting");
+    await api.transcribeMeeting(openMeeting.id);
+  };
+
+  const relabel = async (speakerKey: string, label: string) => {
+    if (!openMeeting) return;
+    setTranscript(await api.relabelSpeaker(openMeeting.id, speakerKey, label));
   };
 
   const recordingNoteTitle =
@@ -178,6 +252,7 @@ export default function App() {
               await refreshNotes();
             })
           }
+          onOpenSettings={() => setShowSettings(true)}
         />
         <NoteList
           notes={notes}
@@ -193,11 +268,17 @@ export default function App() {
           <Editor
             note={openNote}
             meeting={openMeeting}
+            transcript={transcript}
+            pipeStage={pipeStage}
+            pipelineError={pipelineError}
+            modelProgress={modelProgress}
             recStatus={recStatus}
             folders={folders}
             onNoteChanged={onNoteChanged}
             onMoveNote={(folderId) => void moveOpenNote(folderId)}
             onStartRecording={() => void startRecording()}
+            onTranscribe={() => void transcribeNow()}
+            onRelabel={(k, l) => void relabel(k, l)}
           />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-zinc-900 text-zinc-600">
@@ -228,6 +309,18 @@ export default function App() {
           </button>
         )}
       </footer>
+      {showSettings && (
+        <SettingsModal
+          modelProgress={modelProgress}
+          onClose={() => {
+            setShowSettings(false);
+            api
+              .getAsrSettings()
+              .then((s) => setAutoTranscribe(s.auto_transcribe))
+              .catch(console.error);
+          }}
+        />
+      )}
     </div>
   );
 }
