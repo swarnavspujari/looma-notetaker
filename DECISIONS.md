@@ -113,3 +113,18 @@ Running log of technical decisions, newest last. Format: date — decision — w
 - **2026-07-01 — Ollama is the default provider.** Fully local = the privacy-preserving default;
   cloud providers (OpenAI/Anthropic/NIM) are opt-in with keys in the keychain and a clear
   local/cloud badge in Settings.
+
+## M5 — Calendars
+
+- **2026-07-02 — Hand-rolled OAuth (PKCE + loopback) instead of the oauth2 crate.** The flow is
+  ~200 lines: bind 127.0.0.1:0, open the system browser, catch one redirect, exchange the code.
+  Owning it keeps the dependency tree small and makes the redirect UX (success page, state
+  check, 5-min timeout) explicit. Pure parsers (redirect query, token JSON) are unit-tested.
+- **2026-07-02 — BYO OAuth app registrations.** Looma ships no client credentials: users create
+  a free Google "Desktop app" client (ID + secret) and/or an Azure public-client registration
+  (ID only, PKCE). README documents both, step by step. Tokens (and Google's client secret) live
+  in the keychain; client IDs are non-secret settings.
+- **2026-07-02 — MS Graph as public client, Google as installed-app client.** Graph supports
+  secret-less PKCE for desktop apps; Google's installed-app flow still wants its
+  (non-confidential) client secret. Interactive connect cannot run in CI/agent context — pure
+  parsers are tested and the connect flow is on the manual checklist.

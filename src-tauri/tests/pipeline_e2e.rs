@@ -105,7 +105,7 @@ fn golden_fixture_transcribes_and_diarizes() {
 
     let state = AppState::init_with(
         data_dir.clone(),
-        Box::new(looma_secrets::MemorySecretStore::default()),
+        std::sync::Arc::new(looma_secrets::MemorySecretStore::default()),
     )
     .unwrap();
 

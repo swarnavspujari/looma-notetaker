@@ -56,6 +56,28 @@ OS-free domain; every platform capability (audio, ASR, diarization, LLM, calenda
 secrets) is a trait crate; `src-tauri` is the only place impls are picked; `frontend/` is a thin
 React layer.
 
+## Connecting calendars (bring your own OAuth app)
+
+Looma talks directly to Google/Microsoft — no middleman server — so you register your own
+(free) OAuth app once:
+
+**Google Calendar**
+1. In [Google Cloud Console](https://console.cloud.google.com/) create a project → *APIs &
+   Services* → enable the **Google Calendar API**.
+2. *Credentials* → *Create credentials* → **OAuth client ID** → type **Desktop app**.
+3. Copy the client ID and client secret into Looma → Settings → Calendars, hit **Connect**,
+   finish sign-in in the browser tab that opens.
+
+**Microsoft 365 / Outlook**
+1. In [Azure Portal](https://portal.azure.com/) → *App registrations* → *New registration*
+   (any name; supported account types: personal + work accounts).
+2. Under *Authentication* → *Add a platform* → **Mobile and desktop applications** → check the
+   loopback option (`http://localhost`) and enable **Allow public client flows**.
+3. Copy the *Application (client) ID* into Looma → Settings → Calendars → **Connect**.
+   No client secret is needed (PKCE public client).
+
+Tokens are stored in the Windows Credential Manager, never on disk.
+
 ## Docs
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — module boundaries and the porting story

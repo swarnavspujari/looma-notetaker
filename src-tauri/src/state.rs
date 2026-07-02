@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use looma_audio::cpal_backend::CpalAudioCapture;
 use looma_audio::AudioCapture;
@@ -21,18 +21,18 @@ pub struct AppState {
     /// At most one capture session at a time.
     pub recording: Mutex<Option<ActiveRecording>>,
     /// OS keychain — every API key/token goes through this, never plaintext.
-    pub secrets: Box<dyn SecretStore>,
+    pub secrets: Arc<dyn SecretStore>,
     /// meeting_id → current pipeline stage, for running transcriptions.
     pub pipeline_stage: Mutex<HashMap<String, String>>,
 }
 
 impl AppState {
     pub fn init() -> anyhow::Result<Self> {
-        Self::init_with(default_data_dir(), Box::new(KeychainSecretStore::new()))
+        Self::init_with(default_data_dir(), Arc::new(KeychainSecretStore::new()))
     }
 
     /// Composition with explicit data dir + secret store — used by tests.
-    pub fn init_with(data_dir: PathBuf, secrets: Box<dyn SecretStore>) -> anyhow::Result<Self> {
+    pub fn init_with(data_dir: PathBuf, secrets: Arc<dyn SecretStore>) -> anyhow::Result<Self> {
         let storage = Storage::open(&data_dir)?;
         tracing::info!(dir = %data_dir.display(), "storage ready");
         Ok(Self {
@@ -43,6 +43,12 @@ impl AppState {
             secrets,
             pipeline_stage: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Shared handle for components that hold the secret store themselves
+    /// (e.g. calendar providers refreshing tokens).
+    pub fn secrets_arc(&self) -> Arc<dyn SecretStore> {
+        self.secrets.clone()
     }
 }
 

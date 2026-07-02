@@ -193,3 +193,27 @@ export interface AskMessage {
   role: "user" | "assistant";
   content: string;
 }
+
+export interface CalendarEvent {
+  id: string;
+  provider: "google" | "msgraph";
+  title: string;
+  start: string;
+  end: string;
+  attendees: string[];
+  join_url: string | null;
+}
+
+export interface CalendarStatus {
+  google_client_id: string;
+  google_has_secret: boolean;
+  google_connected: boolean;
+  ms_client_id: string;
+  ms_connected: boolean;
+}
+
+export interface CalendarSettingsUpdate {
+  google_client_id: string;
+  google_client_secret: string | null;
+  ms_client_id: string;
+}

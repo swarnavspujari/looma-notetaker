@@ -1,16 +1,22 @@
-import { useMemo, useState } from "react";
-import type { Folder } from "../types";
+import { useEffect, useMemo, useState } from "react";
+import type { CalendarEvent, Folder } from "../types";
 
 export type Selection = { view: "all" } | { view: "unfiled" } | { view: "folder"; id: string };
 
 interface Props {
   folders: Folder[];
+  upcoming: CalendarEvent[];
   selection: Selection;
   onSelect: (sel: Selection) => void;
   onCreateFolder: (name: string, parentId: string | null) => void;
   onRenameFolder: (id: string, name: string) => void;
   onDeleteFolder: (id: string) => void;
+  onStartFromEvent: (ev: CalendarEvent) => void;
   onOpenSettings: () => void;
+}
+
+function eventTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
 interface TreeNode {
@@ -36,14 +42,23 @@ function buildTree(folders: Folder[]): TreeNode[] {
 
 export default function Sidebar({
   folders,
+  upcoming,
   selection,
   onSelect,
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
+  onStartFromEvent,
   onOpenSettings,
 }: Props) {
   const tree = useMemo(() => buildTree(folders), [folders]);
+  // clock for the LIVE badge, refreshed each minute (render must stay pure)
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    setNow(Date.now());
+    const t = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(t);
+  }, []);
   const [newFolderParent, setNewFolderParent] = useState<string | null | "none">("none");
   const [newFolderName, setNewFolderName] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
@@ -165,6 +180,43 @@ export default function Sidebar({
         >
           Unfiled
         </div>
+        {upcoming.length > 0 && (
+          <>
+            <div className="mt-3 px-2 text-xs uppercase tracking-wide text-zinc-500">Upcoming</div>
+            {upcoming.map((ev) => {
+              const live =
+                now > 0 && new Date(ev.start).getTime() <= now && now <= new Date(ev.end).getTime();
+              return (
+                <div
+                  key={`${ev.provider}-${ev.id}`}
+                  className="group mt-0.5 rounded px-2 py-1 text-xs hover:bg-zinc-800"
+                >
+                  <div className="flex items-center gap-1.5">
+                    {live && (
+                      <span className="rounded bg-red-600/80 px-1 text-[10px] font-semibold text-white">
+                        LIVE
+                      </span>
+                    )}
+                    <span className="truncate font-medium text-zinc-300">{ev.title}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-zinc-500">
+                    <span>
+                      {eventTime(ev.start)}–{eventTime(ev.end)} ·{" "}
+                      {ev.provider === "google" ? "Google" : "Outlook"}
+                    </span>
+                    <button
+                      title="Start note + recording for this meeting"
+                      className="hidden rounded bg-red-600/90 px-1.5 text-[10px] font-medium text-white group-hover:inline"
+                      onClick={() => onStartFromEvent(ev)}
+                    >
+                      ● Start
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
         <div className="mt-3 flex items-center justify-between px-2 text-xs uppercase tracking-wide text-zinc-500">
           Folders
           <button

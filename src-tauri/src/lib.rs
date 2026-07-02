@@ -2,6 +2,7 @@
 //! and wired to the UI. `looma-core` and the frontend never see an OS API.
 
 mod asr_commands;
+mod calendar_commands;
 mod commands;
 pub mod hw;
 mod llm_commands;
@@ -72,6 +73,12 @@ pub fn run() {
             llm_commands::get_llm_settings,
             llm_commands::set_llm_settings,
             llm_commands::test_llm_connection,
+            calendar_commands::get_calendar_settings,
+            calendar_commands::set_calendar_settings,
+            calendar_commands::connect_calendar,
+            calendar_commands::disconnect_calendar,
+            calendar_commands::upcoming_meetings,
+            calendar_commands::start_meeting_from_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Looma");

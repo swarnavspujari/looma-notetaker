@@ -3,6 +3,10 @@
 //! Google Calendar and Microsoft Graph impls land in M5 (OAuth via the
 //! system browser + loopback redirect; tokens in the OS keychain).
 
+pub mod google;
+pub mod msgraph;
+pub mod oauth;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 

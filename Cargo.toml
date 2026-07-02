@@ -46,7 +46,7 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 # keyring 3.x: platform stores built in (v4 splits them into separate crates)
 keyring = { version = "3", features = ["windows-native", "apple-native"] }
 dirs = "6"
-reqwest = { version = "0.13", features = ["json", "stream", "multipart"] }
+reqwest = { version = "0.13", features = ["json", "form", "stream", "multipart"] }
 futures-util = "0.3"
 sha2 = "0.10"
 cpal = "0.18"

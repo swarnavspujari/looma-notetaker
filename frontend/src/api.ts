@@ -5,6 +5,9 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppInfo,
   AskMessage,
+  CalendarEvent,
+  CalendarSettingsUpdate,
+  CalendarStatus,
   AsrSettings,
   AsrSettingsUpdate,
   Folder,
@@ -89,4 +92,14 @@ export const api = {
   getLlmSettings: () => invoke<LlmSettings>("get_llm_settings"),
   setLlmSettings: (update: LlmSettingsUpdate) => invoke<void>("set_llm_settings", { update }),
   testLlmConnection: () => invoke<string>("test_llm_connection"),
+
+  // calendars
+  getCalendarSettings: () => invoke<CalendarStatus>("get_calendar_settings"),
+  setCalendarSettings: (update: CalendarSettingsUpdate) =>
+    invoke<void>("set_calendar_settings", { update }),
+  connectCalendar: (provider: string) => invoke<void>("connect_calendar", { provider }),
+  disconnectCalendar: (provider: string) => invoke<void>("disconnect_calendar", { provider }),
+  upcomingMeetings: () => invoke<CalendarEvent[]>("upcoming_meetings"),
+  startMeetingFromEvent: (title: string, attendees: string[]) =>
+    invoke<RecordingStatus>("start_meeting_from_event", { title, attendees }),
 };

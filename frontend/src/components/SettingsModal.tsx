@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { AsrSettings, LlmSettings, ModelProgress, Template } from "../types";
+import type { AsrSettings, CalendarStatus, LlmSettings, ModelProgress, Template } from "../types";
 
 interface Props {
   modelProgress: ModelProgress | null;
@@ -44,6 +44,65 @@ export default function SettingsModal({ modelProgress, onClose }: Props) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [editingTpl, setEditingTpl] = useState<Template | null>(null);
 
+  // calendar state
+  const [cal, setCal] = useState<CalendarStatus | null>(null);
+  const [googleId, setGoogleId] = useState("");
+  const [googleSecret, setGoogleSecret] = useState("");
+  const [msId, setMsId] = useState("");
+  const [calBusy, setCalBusy] = useState<string | null>(null);
+  const [calMsg, setCalMsg] = useState<string | null>(null);
+
+  const loadCal = () =>
+    api.getCalendarSettings().then((c) => {
+      setCal(c);
+      setGoogleId(c.google_client_id);
+      setMsId(c.ms_client_id);
+    });
+
+  const saveCal = async () => {
+    await api.setCalendarSettings({
+      google_client_id: googleId,
+      google_client_secret: googleSecret ? googleSecret : null,
+      ms_client_id: msId,
+    });
+    setGoogleSecret("");
+    await loadCal();
+    setCalMsg("saved ✓");
+  };
+
+  const connectCal = async (provider: string) => {
+    setCalBusy(provider);
+    setCalMsg("A browser window opened — finish signing in there…");
+    try {
+      await api.setCalendarSettings({
+        google_client_id: googleId,
+        google_client_secret: googleSecret ? googleSecret : null,
+        ms_client_id: msId,
+      });
+      setGoogleSecret("");
+      await api.connectCalendar(provider);
+      setCalMsg(`${provider} connected ✓`);
+      await loadCal();
+    } catch (e) {
+      setCalMsg(`✗ ${e}`);
+    } finally {
+      setCalBusy(null);
+    }
+  };
+
+  const disconnectCal = async (provider: string) => {
+    setCalBusy(provider);
+    try {
+      await api.disconnectCalendar(provider);
+      await loadCal();
+      setCalMsg(`${provider} disconnected`);
+    } catch (e) {
+      setCalMsg(String(e));
+    } finally {
+      setCalBusy(null);
+    }
+  };
+
   const load = () =>
     api.getAsrSettings().then((s) => {
       setSettings(s);
@@ -67,6 +126,7 @@ export default function SettingsModal({ modelProgress, onClose }: Props) {
     load().catch(console.error);
     loadLlm().catch(console.error);
     api.listTemplates().then(setTemplates).catch(console.error);
+    loadCal().catch(console.error);
   }, []);
 
   const pickProvider = (id: string) => {
@@ -367,6 +427,95 @@ export default function SettingsModal({ modelProgress, onClose }: Props) {
             Ollama runs entirely on this machine. OpenAI, Anthropic, and NVIDIA NIM send your notes
             + transcript to their APIs when you use Enhance or Ask.
           </p>
+        </div>
+
+        <div className="mb-4 border-t border-zinc-800 pt-4">
+          <div className="mb-1 font-medium">Calendars</div>
+          <p className="mb-2 text-[11px] text-zinc-500">
+            Bring your own OAuth app: a Google Cloud "Desktop app" client (ID + secret) and/or an
+            Azure app registration with a public client + loopback redirect. Tokens are stored in
+            the Windows keychain. See the README for a step-by-step.
+          </p>
+          <div className="mb-2 rounded border border-zinc-800 p-2 text-xs">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-medium">Google Calendar</span>
+              {cal?.google_connected ? (
+                <span className="flex items-center gap-2">
+                  <span className="text-emerald-400">connected</span>
+                  <button
+                    className="text-zinc-500 hover:text-red-400"
+                    disabled={calBusy !== null}
+                    onClick={() => void disconnectCal("google")}
+                  >
+                    disconnect
+                  </button>
+                </span>
+              ) : (
+                <button
+                  className="rounded bg-indigo-600 px-2 py-0.5 text-white hover:bg-indigo-500 disabled:opacity-50"
+                  disabled={calBusy !== null || !googleId}
+                  onClick={() => void connectCal("google")}
+                >
+                  {calBusy === "google" ? "waiting for browser…" : "Connect"}
+                </button>
+              )}
+            </div>
+            <input
+              placeholder="Client ID (….apps.googleusercontent.com)"
+              value={googleId}
+              onChange={(e) => setGoogleId(e.target.value)}
+              className="mb-1 w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 outline-none focus:border-indigo-500"
+            />
+            <input
+              type="password"
+              placeholder={
+                cal?.google_has_secret ? "Client secret saved — enter to replace" : "Client secret"
+              }
+              value={googleSecret}
+              onChange={(e) => setGoogleSecret(e.target.value)}
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 outline-none focus:border-indigo-500"
+            />
+          </div>
+          <div className="mb-2 rounded border border-zinc-800 p-2 text-xs">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="font-medium">Microsoft 365 / Outlook</span>
+              {cal?.ms_connected ? (
+                <span className="flex items-center gap-2">
+                  <span className="text-emerald-400">connected</span>
+                  <button
+                    className="text-zinc-500 hover:text-red-400"
+                    disabled={calBusy !== null}
+                    onClick={() => void disconnectCal("msgraph")}
+                  >
+                    disconnect
+                  </button>
+                </span>
+              ) : (
+                <button
+                  className="rounded bg-indigo-600 px-2 py-0.5 text-white hover:bg-indigo-500 disabled:opacity-50"
+                  disabled={calBusy !== null || !msId}
+                  onClick={() => void connectCal("msgraph")}
+                >
+                  {calBusy === "msgraph" ? "waiting for browser…" : "Connect"}
+                </button>
+              )}
+            </div>
+            <input
+              placeholder="Application (client) ID — no secret needed"
+              value={msId}
+              onChange={(e) => setMsId(e.target.value)}
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 outline-none focus:border-indigo-500"
+            />
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <button
+              onClick={() => void saveCal()}
+              className="rounded bg-zinc-700 px-2.5 py-1 text-zinc-100 hover:bg-zinc-600"
+            >
+              Save calendar config
+            </button>
+            {calMsg && <span className="text-zinc-400">{calMsg}</span>}
+          </div>
         </div>
 
         <div className="mb-4 border-t border-zinc-800 pt-4">

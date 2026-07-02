@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import type {
   AppInfo,
+  CalendarEvent,
   Folder,
   Meeting,
   ModelProgress,
@@ -44,6 +45,7 @@ export default function App() {
   const [recStatus, setRecStatus] = useState<RecordingStatus>(IDLE_STATUS);
   const [autoTranscribe, setAutoTranscribe] = useState(true);
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [upcoming, setUpcoming] = useState<CalendarEvent[]>([]);
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,6 +80,16 @@ export default function App() {
       .catch(console.error);
     api.listTemplates().then(setTemplates).catch(console.error);
   }, [refreshFolders]);
+
+  // upcoming calendar meetings: on start + every 5 minutes
+  useEffect(() => {
+    const fetchUpcoming = () => {
+      api.upcomingMeetings().then(setUpcoming).catch(console.error);
+    };
+    fetchUpcoming();
+    const t = window.setInterval(fetchUpcoming, 5 * 60_000);
+    return () => window.clearInterval(t);
+  }, []);
 
   useEffect(() => {
     refreshNotes().catch((e) => setError(String(e)));
@@ -221,6 +233,17 @@ export default function App() {
     setTranscript(await api.relabelSpeaker(openMeeting.id, speakerKey, label));
   };
 
+  const startFromEvent = async (ev: CalendarEvent) => {
+    try {
+      const status = await api.startMeetingFromEvent(ev.title, ev.attendees);
+      setRecStatus(status);
+      await refreshNotes();
+      if (status.note_id) await openNoteById(status.note_id);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const recordingNoteTitle =
     recStatus.note_id != null
       ? (notes.find((n) => n.id === recStatus.note_id)?.title ??
@@ -240,6 +263,7 @@ export default function App() {
       <div className="flex min-h-0 flex-1">
         <Sidebar
           folders={folders}
+          upcoming={upcoming}
           selection={selection}
           onSelect={setSelection}
           onCreateFolder={(name, parentId) =>
@@ -255,6 +279,7 @@ export default function App() {
               await refreshNotes();
             })
           }
+          onStartFromEvent={(ev) => void startFromEvent(ev)}
           onOpenSettings={() => setShowSettings(true)}
         />
         <NoteList
@@ -323,6 +348,7 @@ export default function App() {
               .then((s) => setAutoTranscribe(s.auto_transcribe))
               .catch(console.error);
             api.listTemplates().then(setTemplates).catch(console.error);
+            api.upcomingMeetings().then(setUpcoming).catch(console.error);
           }}
         />
       )}

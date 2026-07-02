@@ -62,6 +62,17 @@ pub fn start_recording(
     state: State<'_, AppState>,
     note_id: Option<String>,
 ) -> CmdResult<RecordingStatus> {
+    start_recording_impl(&state, note_id, None, &[])
+}
+
+/// Shared start path — also used by the calendar one-click start, which
+/// prefills the note title and meeting attendees (spec item 9).
+pub fn start_recording_impl(
+    state: &AppState,
+    note_id: Option<String>,
+    title: Option<String>,
+    attendees: &[String],
+) -> CmdResult<RecordingStatus> {
     let mut recording = state.recording.lock().unwrap();
     if recording.is_some() {
         return Err("a recording is already in progress".into());
@@ -72,14 +83,16 @@ pub fn start_recording(
         let note = match note_id {
             Some(id) => storage.get_note(&id).map_err(|e| e.to_string())?,
             None => {
-                let title = format!("Meeting {}", chrono::Local::now().format("%Y-%m-%d %H:%M"));
+                let title = title.unwrap_or_else(|| {
+                    format!("Meeting {}", chrono::Local::now().format("%Y-%m-%d %H:%M"))
+                });
                 storage
                     .create_note(&title, None)
                     .map_err(|e| e.to_string())?
             }
         };
         let meeting = storage
-            .create_meeting(&note.title, &note.id, &[])
+            .create_meeting(&note.title, &note.id, attendees)
             .map_err(|e| e.to_string())?;
         (note, meeting)
     };
