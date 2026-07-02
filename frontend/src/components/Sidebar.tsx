@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CalendarEvent, Folder } from "../types";
+import { Btn, SectionLabel, speakerColor } from "./ui";
 
 export type Selection = { view: "all" } | { view: "unfiled" } | { view: "folder"; id: string };
 
@@ -17,6 +18,13 @@ interface Props {
 
 function eventTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Stable rotation index so each folder keeps the same dot color across renders. */
+function hashId(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+  return Math.abs(h);
 }
 
 interface TreeNode {
@@ -39,6 +47,11 @@ function buildTree(folders: Folder[]): TreeNode[] {
     }));
   return build(null);
 }
+
+const ROW =
+  "flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13.5px] font-medium text-ink";
+const INPUT =
+  "rounded-lg border border-line bg-surface px-2 py-1 text-[13px] text-ink outline-none placeholder:text-mute";
 
 export default function Sidebar({
   folders,
@@ -78,17 +91,18 @@ export default function Sidebar({
     return (
       <div key={folder.id}>
         <div
-          className={`group flex cursor-pointer items-center gap-1 rounded px-2 py-1 text-sm ${
-            selected ? "bg-indigo-600/30 text-indigo-200" : "text-zinc-300 hover:bg-zinc-800"
-          }`}
-          style={{ paddingLeft: `${8 + depth * 14}px` }}
+          className={`group ${ROW} ${selected ? "bg-peach" : "hover:bg-peach-2"}`}
+          style={{ paddingLeft: `${10 + depth * 14}px` }}
           onClick={() => onSelect({ view: "folder", id: folder.id })}
         >
-          <span className="text-zinc-500">▸</span>
+          <span
+            className="h-[9px] w-[9px] flex-none rounded-full"
+            style={{ background: speakerColor("", hashId(folder.id)) }}
+          />
           {renaming?.id === folder.id ? (
             <input
               autoFocus
-              className="w-full rounded bg-zinc-800 px-1 text-sm text-zinc-100 outline-none"
+              className="w-full rounded-md border border-line bg-surface px-1.5 text-[13px] text-ink outline-none"
               value={renaming.name}
               onChange={(e) => setRenaming({ id: folder.id, name: e.target.value })}
               onBlur={() => {
@@ -114,7 +128,7 @@ export default function Sidebar({
           )}
           <button
             title="New subfolder"
-            className="hidden text-zinc-500 hover:text-zinc-200 group-hover:inline"
+            className="hidden cursor-pointer text-mute hover:text-ink group-hover:inline"
             onClick={(e) => {
               e.stopPropagation();
               setNewFolderParent(folder.id);
@@ -125,7 +139,7 @@ export default function Sidebar({
           </button>
           <button
             title="Delete folder"
-            className="hidden text-zinc-500 hover:text-red-400 group-hover:inline"
+            className="hidden cursor-pointer text-mute hover:text-rec group-hover:inline"
             onClick={(e) => {
               e.stopPropagation();
               if (confirm(`Delete folder "${folder.name}"? Notes inside become unfiled.`)) {
@@ -140,8 +154,8 @@ export default function Sidebar({
           <input
             autoFocus
             placeholder="Subfolder name"
-            className="mt-0.5 w-[85%] rounded bg-zinc-800 px-2 py-0.5 text-sm text-zinc-100 outline-none"
-            style={{ marginLeft: `${22 + depth * 14}px` }}
+            className={`mt-0.5 w-[85%] ${INPUT}`}
+            style={{ marginLeft: `${27 + depth * 14}px` }}
             value={newFolderName}
             onChange={(e) => setNewFolderName(e.target.value)}
             onBlur={submitNewFolder}
@@ -157,84 +171,87 @@ export default function Sidebar({
   };
 
   return (
-    <div className="flex h-full w-60 flex-col border-r border-zinc-800 bg-zinc-950">
-      <div className="px-4 pb-2 pt-4 text-lg font-semibold tracking-tight text-zinc-100">Looma</div>
-      <nav className="flex-1 overflow-y-auto px-2 pb-2">
+    <div className="flex h-full w-60 flex-col border-r border-line bg-shell">
+      <div className="flex items-center gap-2.5 px-4 pb-2.5 pt-3.5">
+        <span className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-[9px] bg-coral">
+          <span className="h-3.5 w-3.5 rounded-full border-[3px] border-white" />
+        </span>
+        <span className="font-display text-[19px] font-bold tracking-tight text-ink">Looma</span>
+      </div>
+      <nav className="flex-1 overflow-y-auto px-3 pb-3">
         <div
-          className={`cursor-pointer rounded px-2 py-1 text-sm ${
-            selection.view === "all"
-              ? "bg-indigo-600/30 text-indigo-200"
-              : "text-zinc-300 hover:bg-zinc-800"
-          }`}
+          className={`${ROW} ${selection.view === "all" ? "bg-peach" : "hover:bg-peach-2"}`}
           onClick={() => onSelect({ view: "all" })}
         >
+          <span className="h-3 w-3 flex-none rounded bg-mute/55" />
           All notes
         </div>
         <div
-          className={`cursor-pointer rounded px-2 py-1 text-sm ${
-            selection.view === "unfiled"
-              ? "bg-indigo-600/30 text-indigo-200"
-              : "text-zinc-300 hover:bg-zinc-800"
-          }`}
+          className={`${ROW} ${selection.view === "unfiled" ? "bg-peach" : "hover:bg-peach-2"}`}
           onClick={() => onSelect({ view: "unfiled" })}
         >
+          <span className="h-3 w-3 flex-none rounded border-[1.5px] border-mute/70" />
           Unfiled
         </div>
         {upcoming.length > 0 && (
           <>
-            <div className="mt-3 px-2 text-xs uppercase tracking-wide text-zinc-500">Upcoming</div>
+            <SectionLabel className="mt-4 px-2.5 pb-1.5">Up next</SectionLabel>
             {upcoming.map((ev) => {
               const live =
                 now > 0 && new Date(ev.start).getTime() <= now && now <= new Date(ev.end).getTime();
               return (
                 <div
                   key={`${ev.provider}-${ev.id}`}
-                  className="group mt-0.5 rounded px-2 py-1 text-xs hover:bg-zinc-800"
+                  className="group mt-0.5 rounded-lg px-2.5 py-1.5 hover:bg-peach-2"
                 >
                   <div className="flex items-center gap-1.5">
                     {live && (
-                      <span className="rounded bg-red-600/80 px-1 text-[10px] font-semibold text-white">
+                      <span className="flex-none rounded bg-rec px-1 py-px text-[9.5px] font-semibold leading-[14px] text-white">
                         LIVE
                       </span>
                     )}
-                    <span className="truncate font-medium text-zinc-300">{ev.title}</span>
+                    <span className="truncate text-[13px] font-semibold text-ink">{ev.title}</span>
                   </div>
-                  <div className="flex items-center justify-between text-zinc-500">
-                    <span>
+                  <div className="flex items-center justify-between gap-1.5">
+                    <span className="truncate text-[11.5px] text-mute">
                       {eventTime(ev.start)}–{eventTime(ev.end)} ·{" "}
                       {ev.provider === "google" ? "Google" : "Outlook"}
                     </span>
-                    <button
-                      title="Start note + recording for this meeting"
-                      className="hidden rounded bg-red-600/90 px-1.5 text-[10px] font-medium text-white group-hover:inline"
-                      onClick={() => onStartFromEvent(ev)}
-                    >
-                      ● Start
-                    </button>
+                    <span className="hidden flex-none group-hover:inline-flex">
+                      <Btn
+                        variant="soft"
+                        size="xs"
+                        title="Start note + recording for this meeting"
+                        onClick={() => onStartFromEvent(ev)}
+                      >
+                        Start
+                      </Btn>
+                    </span>
                   </div>
                 </div>
               );
             })}
           </>
         )}
-        <div className="mt-3 flex items-center justify-between px-2 text-xs uppercase tracking-wide text-zinc-500">
-          Folders
-          <button
+        <div className="mt-4 flex items-center justify-between pb-1 pl-2.5 pr-1">
+          <SectionLabel>Folders</SectionLabel>
+          <Btn
+            variant="ghost"
+            size="xs"
             title="New folder"
-            className="text-zinc-500 hover:text-zinc-200"
             onClick={() => {
               setNewFolderParent(null);
               setNewFolderName("");
             }}
           >
             +
-          </button>
+          </Btn>
         </div>
         {newFolderParent === null && (
           <input
             autoFocus
             placeholder="Folder name"
-            className="mx-2 mt-1 w-[85%] rounded bg-zinc-800 px-2 py-0.5 text-sm text-zinc-100 outline-none"
+            className={`mx-2.5 mt-1 w-[85%] ${INPUT}`}
             value={newFolderName}
             onChange={(e) => setNewFolderName(e.target.value)}
             onBlur={submitNewFolder}
@@ -248,9 +265,10 @@ export default function Sidebar({
       </nav>
       <button
         onClick={onOpenSettings}
-        className="flex items-center gap-2 border-t border-zinc-800 px-4 py-2.5 text-left text-sm text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+        className="flex cursor-pointer items-center gap-2.5 border-t border-line px-4 py-2.5 text-left text-[13px] font-medium text-ink-2 hover:bg-peach-2 hover:text-ink"
       >
-        ⚙ Settings
+        <span className="h-3 w-3 flex-none rounded-full border-2 border-mute/60" />
+        Settings
       </button>
     </div>
   );
