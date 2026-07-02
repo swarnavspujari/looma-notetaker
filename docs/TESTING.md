@@ -20,8 +20,10 @@
   offline with the deterministic `MockLLMProvider` — note + transcript → prompt (numbered
   segments) → canned block JSON → provenance-tagged storage, zoom-in id mapping, FTS
   searchability, markdown mirror, and reclaim-on-edit semantics.
-- **MCP test** *(lands with M6)*: spawn the stdio server, assert `search_notes`/`get_note`
-  return expected resources.
+- **MCP tests** (`crates/looma-mcp`, run in CI): in-process protocol tests (initialize
+  handshake, tools/list, tool calls, error paths) plus `tests/stdio.rs`, which spawns the real
+  `looma-mcp` binary against a seeded data dir and asserts `search_notes`/`get_note` return the
+  expected resources over actual stdio.
 
 ## CI
 
@@ -41,7 +43,12 @@ Every push: ESLint + Prettier check, `tsc` typecheck, frontend build, rustfmt ch
       recolors it as user text; zoom-in shows the right segment (M4)
 - [ ] Ask panel answers from the transcript; provider switch (incl. Ollama local) works (M4)
 - [ ] Google and Microsoft calendars connect; upcoming meeting one-click starts a note (M5)
-- [ ] External MCP client (Claude Desktop) can search and read notes (M6)
-- [ ] Screen recording (full/window/region) attaches to a note (M7)
-- [ ] Importing an audio/video file yields a diarized, summarized note (M8)
+- [ ] External MCP client (Claude Desktop) can search and read notes (M6) — paste the snippet
+      from Settings → "Chat with your notes (MCP)" into `claude_desktop_config.json`
+- [ ] Screen recording (full/window/region) records, finalizes on Stop, and appears as an
+      attachment on the note; ffmpeg downloads on first use with progress (M7)
+- [ ] Importing an audio file (wav) AND a video file (mp4) each yield a diarized transcript on
+      a new note; non-wav goes through ffmpeg conversion (M8)
+- [ ] First-run consent notice appears once; recording indicator stays visible while recording
+      (M9)
 - [ ] Clean-machine install from the built installer runs the full flow (M9)

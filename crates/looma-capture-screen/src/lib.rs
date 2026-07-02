@@ -3,6 +3,8 @@
 //! Windows impl (ffmpeg sidecar, gdigrab/ddagrab) lands in M7. macOS
 //! (ScreenCaptureKit) is future work — see docs/PORTING.md.
 
+pub mod ffmpeg;
+
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};

@@ -2346,10 +2346,12 @@ name = "looma-mcp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "dirs",
  "looma-core",
  "looma-storage",
  "serde",
  "serde_json",
+ "tempfile",
  "tracing",
 ]
 

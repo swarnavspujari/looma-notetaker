@@ -217,3 +217,19 @@ export interface CalendarSettingsUpdate {
   google_client_secret: string | null;
   ms_client_id: string;
 }
+
+export type CaptureTarget =
+  | { kind: "full_screen" }
+  | { kind: "window"; title: string }
+  | { kind: "region"; x: number; y: number; width: number; height: number };
+
+export interface ScreenStatus {
+  active: boolean;
+  note_id: string | null;
+  elapsed_ms: number;
+}
+
+export interface ImportResult {
+  meeting: Meeting;
+  note_id: string;
+}

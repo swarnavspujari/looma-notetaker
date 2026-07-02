@@ -8,9 +8,11 @@ import type {
   Meeting,
   ModelProgress,
   Note,
+  CaptureTarget,
   NoteSummary,
   PipelineProgress,
   RecordingStatus,
+  ScreenStatus,
   SearchHit,
   Template,
   Transcript,
@@ -20,6 +22,7 @@ import NoteList from "./components/NoteList";
 import Editor from "./components/Editor";
 import RecordingBar from "./components/RecordingBar";
 import SettingsModal from "./components/SettingsModal";
+import FirstRunNotice from "./components/FirstRunNotice";
 
 const IDLE_STATUS: RecordingStatus = {
   active: false,
@@ -43,10 +46,16 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
   const [recStatus, setRecStatus] = useState<RecordingStatus>(IDLE_STATUS);
+  const [screenStatus, setScreenStatus] = useState<ScreenStatus>({
+    active: false,
+    note_id: null,
+    elapsed_ms: 0,
+  });
   const [autoTranscribe, setAutoTranscribe] = useState(true);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [upcoming, setUpcoming] = useState<CalendarEvent[]>([]);
   const [showSettings, setShowSettings] = useState(false);
+  const [showFirstRun, setShowFirstRun] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const openMeetingIdRef = useRef<string | null>(null);
@@ -79,6 +88,10 @@ export default function App() {
       .then((s) => setAutoTranscribe(s.auto_transcribe))
       .catch(console.error);
     api.listTemplates().then(setTemplates).catch(console.error);
+    api
+      .getAppSetting("consent.recording_notice_accepted")
+      .then((v) => setShowFirstRun(v !== "true"))
+      .catch(console.error);
   }, [refreshFolders]);
 
   // upcoming calendar meetings: on start + every 5 minutes
@@ -95,10 +108,11 @@ export default function App() {
     refreshNotes().catch((e) => setError(String(e)));
   }, [refreshNotes]);
 
-  // poll recording status once a second (recording indicator, elapsed time)
+  // poll recording + screen status once a second (indicators, elapsed time)
   useEffect(() => {
     const t = window.setInterval(() => {
       api.recordingStatus().then(setRecStatus).catch(console.error);
+      api.screenStatus().then(setScreenStatus).catch(console.error);
     }, 1000);
     return () => window.clearInterval(t);
   }, []);
@@ -233,6 +247,37 @@ export default function App() {
     setTranscript(await api.relabelSpeaker(openMeeting.id, speakerKey, label));
   };
 
+  const startScreen = async (target: CaptureTarget) => {
+    if (!openNote) return;
+    try {
+      setScreenStatus(await api.startScreenRecording(openNote.id, target));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const stopScreen = async () => {
+    try {
+      const updated = await api.stopScreenRecording();
+      setScreenStatus({ active: false, note_id: null, elapsed_ms: 0 });
+      if (openNote?.id === updated.id) setOpenNote(updated);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const importMedia = async () => {
+    try {
+      const result = await api.importMedia();
+      if (result) {
+        await refreshNotes();
+        await openNoteById(result.note_id);
+      }
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const startFromEvent = async (ev: CalendarEvent) => {
     try {
       const status = await api.startMeetingFromEvent(ev.title, ev.attendees);
@@ -291,6 +336,7 @@ export default function App() {
           onOpenNote={(id) => void openNoteById(id)}
           onNewNote={() => void newNote()}
           onDeleteNote={(id) => void deleteNote(id)}
+          onImport={() => void importMedia()}
         />
         {openNote ? (
           <Editor
@@ -301,11 +347,14 @@ export default function App() {
             pipelineError={pipelineError}
             modelProgress={modelProgress}
             recStatus={recStatus}
+            screenStatus={screenStatus}
             folders={folders}
             templates={templates}
             onNoteChanged={onNoteChanged}
             onMoveNote={(folderId) => void moveOpenNote(folderId)}
             onStartRecording={() => void startRecording()}
+            onStartScreen={(target) => void startScreen(target)}
+            onStopScreen={() => void stopScreen()}
             onTranscribe={() => void transcribeNow()}
             onRelabel={(k, l) => void relabel(k, l)}
           />
@@ -338,6 +387,14 @@ export default function App() {
           </button>
         )}
       </footer>
+      {showFirstRun && (
+        <FirstRunNotice
+          onAccept={() => {
+            setShowFirstRun(false);
+            void api.setAppSetting("consent.recording_notice_accepted", "true");
+          }}
+        />
+      )}
       {showSettings && (
         <SettingsModal
           modelProgress={modelProgress}

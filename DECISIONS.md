@@ -128,3 +128,24 @@ Running log of technical decisions, newest last. Format: date — decision — w
   secret-less PKCE for desktop apps; Google's installed-app flow still wants its
   (non-confidential) client secret. Interactive connect cannot run in CI/agent context — pure
   parsers are tested and the connect flow is on the manual checklist.
+
+## M6 — MCP server
+
+- **2026-07-02 — Hand-rolled MCP over newline-delimited JSON-RPC.** The server speaks the MCP
+  basics (initialize/ping/tools) in ~300 lines with zero protocol dependencies; it echoes the
+  client's protocolVersion. Read-only by design — external clients can search and read, never
+  mutate notes. Verified two ways: in-process unit tests and an integration test that spawns the
+  real binary and talks over its stdio; plus a live client session against the app data dir.
+- **2026-07-02 — Settings generates the exact Claude Desktop snippet** (absolute path to
+  looma-mcp.exe next to the app exe) with copy-to-clipboard, so setup is paste-one-block.
+
+## M7/M8 — Screen recording & file import
+
+- **2026-07-02 — ffmpeg sidecar with gdigrab; graceful 'q' shutdown.** Full screen / window
+  title / region map to gdigrab args (pure fn, unit-tested); stopping writes `q` to stdin so
+  the MP4 moov atom is finalized, with a 10 s kill fallback. Output is written directly into
+  `attachments/<note_id>/` and registered in-place (no copy of large videos).
+- **2026-07-02 — Imports reuse the recording pipeline unchanged.** An imported file becomes a
+  note + meeting with a 16 kHz mono `recording.mixed.wav` (pure-Rust for PCM WAVs; ffmpeg for
+  everything else), then the exact same transcribe→diarize→align flow runs — one pipeline,
+  two entry points.

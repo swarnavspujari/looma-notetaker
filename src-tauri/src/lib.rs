@@ -5,10 +5,12 @@ mod asr_commands;
 mod calendar_commands;
 mod commands;
 pub mod hw;
+mod import_commands;
 mod llm_commands;
 pub mod models;
 pub mod pipeline;
 mod recording;
+mod screen_commands;
 pub mod state;
 
 use tauri::Manager;
@@ -49,6 +51,9 @@ pub fn run() {
             commands::open_attachment,
             commands::reveal_attachment,
             commands::reveal_data_dir,
+            commands::mcp_config,
+            commands::get_app_setting,
+            commands::set_app_setting,
             commands::search,
             recording::recording_status,
             recording::start_recording,
@@ -79,6 +84,10 @@ pub fn run() {
             calendar_commands::disconnect_calendar,
             calendar_commands::upcoming_meetings,
             calendar_commands::start_meeting_from_event,
+            screen_commands::screen_status,
+            screen_commands::start_screen_recording,
+            screen_commands::stop_screen_recording,
+            import_commands::import_media,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Looma");

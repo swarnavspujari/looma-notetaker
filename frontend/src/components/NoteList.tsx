@@ -9,6 +9,7 @@ interface Props {
   onOpenNote: (id: string) => void;
   onNewNote: () => void;
   onDeleteNote: (id: string) => void;
+  onImport: () => void;
 }
 
 function relTime(iso: string): string {
@@ -50,6 +51,7 @@ export default function NoteList({
   onOpenNote,
   onNewNote,
   onDeleteNote,
+  onImport,
 }: Props) {
   const searching = searchQuery.trim().length > 0;
 
@@ -68,6 +70,13 @@ export default function NoteList({
           className="rounded-md bg-indigo-600 px-2.5 py-1.5 text-sm font-medium text-white hover:bg-indigo-500"
         >
           +
+        </button>
+        <button
+          onClick={onImport}
+          title="Import an audio/video file and transcribe it"
+          className="rounded-md border border-zinc-700 px-2 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800"
+        >
+          ⬆
         </button>
       </div>
       <div className="flex-1 overflow-y-auto px-2 pb-2">

@@ -10,6 +10,7 @@ use looma_secrets::{KeychainSecretStore, SecretStore};
 use looma_storage::Storage;
 
 use crate::recording::ActiveRecording;
+use crate::screen_commands::ActiveScreenRecording;
 
 pub struct AppState {
     /// rusqlite connections are Send but not Sync; all storage access goes
@@ -24,6 +25,8 @@ pub struct AppState {
     pub secrets: Arc<dyn SecretStore>,
     /// meeting_id → current pipeline stage, for running transcriptions.
     pub pipeline_stage: Mutex<HashMap<String, String>>,
+    /// At most one screen capture at a time.
+    pub screen: Mutex<Option<ActiveScreenRecording>>,
 }
 
 impl AppState {
@@ -42,6 +45,7 @@ impl AppState {
             recording: Mutex::new(None),
             secrets,
             pipeline_stage: Mutex::new(HashMap::new()),
+            screen: Mutex::new(None),
         })
     }
 

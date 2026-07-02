@@ -44,6 +44,10 @@ export default function SettingsModal({ modelProgress, onClose }: Props) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [editingTpl, setEditingTpl] = useState<Template | null>(null);
 
+  // MCP state
+  const [mcpJson, setMcpJson] = useState("");
+  const [mcpCopied, setMcpCopied] = useState(false);
+
   // calendar state
   const [cal, setCal] = useState<CalendarStatus | null>(null);
   const [googleId, setGoogleId] = useState("");
@@ -127,6 +131,7 @@ export default function SettingsModal({ modelProgress, onClose }: Props) {
     loadLlm().catch(console.error);
     api.listTemplates().then(setTemplates).catch(console.error);
     loadCal().catch(console.error);
+    api.mcpConfig().then(setMcpJson).catch(console.error);
   }, []);
 
   const pickProvider = (id: string) => {
@@ -594,6 +599,33 @@ export default function SettingsModal({ modelProgress, onClose }: Props) {
                 </span>
               </div>
             ))
+          )}
+        </div>
+
+        <div className="mb-4 border-t border-zinc-800 pt-4">
+          <div className="mb-1 font-medium">Chat with your notes (MCP)</div>
+          <p className="mb-2 text-[11px] text-zinc-500">
+            Looma ships a local MCP server. Add this to Claude Desktop's{" "}
+            <code>claude_desktop_config.json</code> (or any MCP client) to search and read your
+            notes and transcripts — everything stays on this machine.
+          </p>
+          {mcpJson && (
+            <div className="relative">
+              <pre className="overflow-x-auto rounded border border-zinc-800 bg-zinc-950 p-2 text-[11px] text-zinc-300">
+                {mcpJson}
+              </pre>
+              <button
+                className="absolute right-2 top-2 rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300 hover:bg-zinc-800"
+                onClick={() => {
+                  void navigator.clipboard.writeText(mcpJson).then(() => {
+                    setMcpCopied(true);
+                    window.setTimeout(() => setMcpCopied(false), 1500);
+                  });
+                }}
+              >
+                {mcpCopied ? "copied ✓" : "copy"}
+              </button>
+            </div>
           )}
         </div>
 

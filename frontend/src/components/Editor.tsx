@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type {
+  CaptureTarget,
   Folder,
   Meeting,
   ModelProgress,
   Note,
   RecordingStatus,
+  ScreenStatus,
   Template,
   Transcript,
 } from "../types";
@@ -22,11 +24,14 @@ interface Props {
   pipelineError: string | null;
   modelProgress: ModelProgress | null;
   recStatus: RecordingStatus;
+  screenStatus: ScreenStatus;
   folders: Folder[];
   templates: Template[];
   onNoteChanged: (note: Note) => void;
   onMoveNote: (folderId: string | null) => void;
   onStartRecording: () => void;
+  onStartScreen: (target: CaptureTarget) => void;
+  onStopScreen: () => void;
   onTranscribe: () => void;
   onRelabel: (speakerKey: string, label: string) => void;
 }
@@ -41,11 +46,14 @@ export default function Editor({
   pipelineError,
   modelProgress,
   recStatus,
+  screenStatus,
   folders,
   templates,
   onNoteChanged,
   onMoveNote,
   onStartRecording,
+  onStartScreen,
+  onStopScreen,
   onTranscribe,
   onRelabel,
 }: Props) {
@@ -179,6 +187,48 @@ export default function Editor({
             >
               ● Record
             </button>
+          )}
+          {screenStatus.active ? (
+            <button
+              onClick={onStopScreen}
+              title="Stop the screen recording"
+              className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-500"
+            >
+              🖥 {fmtElapsed(screenStatus.elapsed_ms)} ■ Stop
+            </button>
+          ) : (
+            <select
+              value=""
+              onChange={(e) => {
+                const choice = e.target.value;
+                e.target.value = "";
+                if (choice === "full") {
+                  onStartScreen({ kind: "full_screen" });
+                } else if (choice === "window") {
+                  const title = prompt("Exact window title to capture:");
+                  if (title) onStartScreen({ kind: "window", title });
+                } else if (choice === "region") {
+                  const spec = prompt("Region as x,y,width,height:", "0,0,1280,720");
+                  const parts = spec?.split(",").map((n) => parseInt(n.trim(), 10)) ?? [];
+                  if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
+                    onStartScreen({
+                      kind: "region",
+                      x: parts[0],
+                      y: parts[1],
+                      width: parts[2],
+                      height: parts[3],
+                    });
+                  }
+                }
+              }}
+              title="Record the screen (attached to this note)"
+              className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-400 outline-none"
+            >
+              <option value="">🖥 Screen…</option>
+              <option value="full">Full screen</option>
+              <option value="window">Window…</option>
+              <option value="region">Region…</option>
+            </select>
           )}
           <select
             value={templateId}

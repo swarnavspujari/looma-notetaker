@@ -8,6 +8,9 @@ import type {
   CalendarEvent,
   CalendarSettingsUpdate,
   CalendarStatus,
+  CaptureTarget,
+  ImportResult,
+  ScreenStatus,
   AsrSettings,
   AsrSettingsUpdate,
   Folder,
@@ -55,6 +58,9 @@ export const api = {
   openAttachment: (relPath: string) => invoke<void>("open_attachment", { relPath }),
   revealAttachment: (relPath: string) => invoke<void>("reveal_attachment", { relPath }),
   revealDataDir: () => invoke<void>("reveal_data_dir"),
+  mcpConfig: () => invoke<string>("mcp_config"),
+  getAppSetting: (key: string) => invoke<string | null>("get_app_setting", { key }),
+  setAppSetting: (key: string, value: string) => invoke<void>("set_app_setting", { key, value }),
 
   // search
   search: (query: string) => invoke<SearchHit[]>("search", { query }),
@@ -102,4 +108,11 @@ export const api = {
   upcomingMeetings: () => invoke<CalendarEvent[]>("upcoming_meetings"),
   startMeetingFromEvent: (title: string, attendees: string[]) =>
     invoke<RecordingStatus>("start_meeting_from_event", { title, attendees }),
+
+  // screen recording & import
+  screenStatus: () => invoke<ScreenStatus>("screen_status"),
+  startScreenRecording: (noteId: string, target: CaptureTarget) =>
+    invoke<ScreenStatus>("start_screen_recording", { noteId, target }),
+  stopScreenRecording: () => invoke<Note>("stop_screen_recording"),
+  importMedia: () => invoke<ImportResult | null>("import_media"),
 };

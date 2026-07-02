@@ -107,6 +107,16 @@ pub const REGISTRY: &[Artifact] = &[
         probe_rel: "models/asr/ggml-large-v3-turbo-q5_0.bin",
     },
     Artifact {
+        id: "ffmpeg",
+        display: "ffmpeg (n8.1, screen capture + media import)",
+        url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34/ffmpeg-n8.1.2-21-gce3c09c101-win64-gpl-shared-8.1.zip",
+        sha256: "ec51253085a831b517e68cb7a1e46d13fcc8324f5e61ac0b3fd73c56af41ca21",
+        bytes: 79_279_847,
+        kind: ArtifactKind::Archive,
+        dest_rel: "bin/ffmpeg",
+        probe_rel: "bin/ffmpeg/ffmpeg-n8.1.2-21-gce3c09c101-win64-gpl-shared-8.1/bin/ffmpeg.exe",
+    },
+    Artifact {
         id: "ggml-large-v3-q5_0",
         display: "Whisper large-v3 (Q5, ~1 GB) — maximum quality",
         url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-q5_0.bin",

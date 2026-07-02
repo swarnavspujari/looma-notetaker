@@ -67,6 +67,32 @@ impl Storage {
     pub fn attachment_abs_path(&self, rel_path: &str) -> std::path::PathBuf {
         self.data_dir.join(rel_path)
     }
+
+    /// Register a file that is ALREADY inside the data dir (e.g. a screen
+    /// recording written straight to its final location) — no copy.
+    pub fn add_attachment_in_place(&self, note_id: &str, rel_path: &str) -> Result<Note> {
+        let note = self.get_note(note_id)?;
+        let abs = self.data_dir.join(rel_path);
+        if !abs.is_file() {
+            return Err(StorageError::Invalid(format!(
+                "not a file inside the data dir: {rel_path}"
+            )));
+        }
+        let file_name = abs
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("attachment")
+            .to_string();
+        let mut attachments = note.attachments;
+        attachments.push(Attachment {
+            id: looma_core::new_id(),
+            mime: mime_from_ext(&file_name),
+            file_name,
+            rel_path: rel_path.replace('\\', "/"),
+            added_at: Utc::now(),
+        });
+        self.set_note_attachments(note_id, &attachments)
+    }
 }
 
 fn mime_from_ext(name: &str) -> Option<String> {

@@ -36,6 +36,28 @@ pub fn app_info(state: State<'_, AppState>) -> AppInfo {
     }
 }
 
+/// Generic non-secret app settings (consent flags, UI prefs). Secrets never
+/// go through here — they belong to looma-secrets.
+#[tauri::command]
+pub fn get_app_setting(state: State<'_, AppState>, key: String) -> CmdResult<Option<String>> {
+    state
+        .storage
+        .lock()
+        .unwrap()
+        .get_setting(&key)
+        .map_err(err_str)
+}
+
+#[tauri::command]
+pub fn set_app_setting(state: State<'_, AppState>, key: String, value: String) -> CmdResult<()> {
+    state
+        .storage
+        .lock()
+        .unwrap()
+        .set_setting(&key, &value)
+        .map_err(err_str)
+}
+
 // ---------------------------------------------------------------------------
 // Folders
 // ---------------------------------------------------------------------------
@@ -260,6 +282,27 @@ pub fn reveal_data_dir(app: tauri::AppHandle, state: State<'_, AppState>) -> Cmd
     app.opener()
         .reveal_item_in_dir(&state.data_dir)
         .map_err(err_str)
+}
+
+/// Claude Desktop / MCP client config snippet pointing at the looma-mcp
+/// binary that ships next to the app executable.
+#[tauri::command]
+pub fn mcp_config() -> CmdResult<String> {
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
+        .ok_or("cannot resolve the app directory")?;
+    let mcp = exe_dir.join(if cfg!(windows) {
+        "looma-mcp.exe"
+    } else {
+        "looma-mcp"
+    });
+    serde_json::to_string_pretty(&serde_json::json!({
+        "mcpServers": {
+            "looma": { "command": mcp.display().to_string(), "args": [] }
+        }
+    }))
+    .map_err(err_str)
 }
 
 // ---------------------------------------------------------------------------
