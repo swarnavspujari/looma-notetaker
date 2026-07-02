@@ -164,3 +164,38 @@ Running log of technical decisions, newest last. Format: date — decision — w
   user-visible with a reveal-in-Explorer affordance.
 - **2026-07-02 — Mic device selection is a stored setting** (`capture.mic_device_id`), applied
   at recording start; default remains the system default microphone.
+
+## M10 — Design-system UI overhaul
+
+- **2026-07-01 — Adopted the Claude design export as the visual source of truth.** The export
+  (`design/Looma.dc.html`) defines a warm cream/coral language (Bricolage Grotesque display +
+  Spline Sans body). Tokens live in `frontend/src/index.css` under Tailwind v4 `@theme`; shared
+  primitives (`Btn`, `SectionLabel`, `ModalShell`, speaker color/initials helpers) in
+  `frontend/src/components/ui.tsx`. Colors are used only via tokens — no raw palette classes.
+- **2026-07-01 — Fonts are bundled, not fetched.** `@fontsource/bricolage-grotesque` +
+  `@fontsource/spline-sans` ship in the app bundle; a font CDN would break the offline-first
+  guarantee (and the app must render correctly in airplane mode).
+- **2026-07-01 — Light theme replaces the dark zinc theme.** The design system is a light,
+  warm language; the old hardcoded dark palette was replaced everywhere rather than themed
+  twice. A dark mode can come later as a token swap.
+- **2026-07-01 — Provenance rendering per the design's citation idiom.** User blocks are plain
+  ink ("your words stay yours"); AI blocks are peach-tinted with a coral left rule and a
+  peach/clay citation chip that zooms to the source segments. Mic/self is always coral in
+  transcripts; other speakers rotate through the design's speaker palette.
+- **2026-07-01 — Editor header restructured: actions row above, display title below.** With
+  Bricolage at 26px the old single-row header truncated titles at any reasonable window width
+  (verified in the running app); the design export also separates actions from the title.
+- **2026-07-01 — Reskin executed as one-agent-per-surface with adversarial diff review.** Seven
+  surfaces reskinned in parallel with disjoint file ownership; each diff was reviewed by an
+  independent agent for dropped features/handlers before integration, then the whole app was
+  driven and screenshotted over CDP (WebView2 remote debugging + playwright-core) for visual
+  verification.
+
+## M11 — Real-machine validation (fixes)
+
+- **2026-07-01 — Versioned migrations + column repair in looma-storage.** Found live: this
+  machine's `looma.db` predated the `scratchpad` column and every write failed —
+  `CREATE TABLE IF NOT EXISTS` alone never upgrades old tables. `Storage::open` now runs the
+  baseline DDL, then diffs each table against the expected column set and `ALTER TABLE ADD
+  COLUMN`s what's missing (idempotent), then stamps `PRAGMA user_version = 1` for future
+  numbered migrations. Regression test creates an old-schema DB and asserts note CRUD works.

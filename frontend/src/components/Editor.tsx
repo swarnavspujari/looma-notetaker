@@ -12,6 +12,7 @@ import type {
 } from "../types";
 import { api } from "../api";
 import { fmtElapsed } from "./RecordingBar";
+import { Btn } from "./ui";
 import TranscriptPanel from "./TranscriptPanel";
 import EnhancedDoc from "./EnhancedDoc";
 import AskPanel from "./AskPanel";
@@ -37,6 +38,9 @@ interface Props {
 }
 
 const URL_RE = /^https?:\/\/\S+$/;
+
+const SELECT_CLS =
+  "cursor-pointer rounded-lg border border-line bg-surface px-2 py-1 text-xs text-ink-2 outline-none focus:border-coral";
 
 export default function Editor({
   note,
@@ -168,137 +172,149 @@ export default function Editor({
 
   return (
     <div className="flex h-full min-w-0 flex-1">
-      <div className="flex min-w-0 flex-1 flex-col bg-zinc-900">
-        <div className="flex items-center gap-3 border-b border-zinc-800 px-6 py-3">
+      <div className="flex min-w-0 flex-1 flex-col bg-surface">
+        <div className="border-b border-line px-6 pb-3 pt-2.5">
+          <div className="mb-1.5 flex flex-wrap items-center justify-end gap-2">
+            {!recStatus.active && (
+              <Btn
+                variant="record"
+                size="sm"
+                onClick={onStartRecording}
+                title="Record this meeting (mic + system audio)"
+              >
+                <span className="h-2 w-2 rounded-full bg-white" /> Record
+              </Btn>
+            )}
+            {screenStatus.active ? (
+              <Btn
+                variant="dark"
+                size="sm"
+                onClick={onStopScreen}
+                title="Stop the screen recording"
+              >
+                <span className="h-2 w-2 rounded-[3px] bg-white" />
+                <span className="font-mono text-[11px]">{fmtElapsed(screenStatus.elapsed_ms)}</span>
+                Stop
+              </Btn>
+            ) : (
+              <select
+                value=""
+                onChange={(e) => {
+                  const choice = e.target.value;
+                  e.target.value = "";
+                  if (choice === "full") {
+                    onStartScreen({ kind: "full_screen" });
+                  } else if (choice === "window") {
+                    const title = prompt("Exact window title to capture:");
+                    if (title) onStartScreen({ kind: "window", title });
+                  } else if (choice === "region") {
+                    const spec = prompt("Region as x,y,width,height:", "0,0,1280,720");
+                    const parts = spec?.split(",").map((n) => parseInt(n.trim(), 10)) ?? [];
+                    if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
+                      onStartScreen({
+                        kind: "region",
+                        x: parts[0],
+                        y: parts[1],
+                        width: parts[2],
+                        height: parts[3],
+                      });
+                    }
+                  }
+                }}
+                title="Record the screen (attached to this note)"
+                className={SELECT_CLS}
+              >
+                <option value="">Screen…</option>
+                <option value="full">Full screen</option>
+                <option value="window">Window…</option>
+                <option value="region">Region…</option>
+              </select>
+            )}
+            <select
+              value={templateId}
+              onChange={(e) => setTemplateId(e.target.value)}
+              className={`max-w-36 ${SELECT_CLS}`}
+              title="Template for Enhance"
+            >
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <Btn
+              variant="soft"
+              size="sm"
+              onClick={() => void enhance()}
+              disabled={enhancing}
+              title="Merge your notes with the transcript into structured notes"
+            >
+              <span className="h-[7px] w-[7px] rounded-full bg-coral" />
+              {enhancing ? "Enhancing…" : note.blocks.length > 0 ? "Re-enhance" : "Enhance"}
+            </Btn>
+            <Btn
+              variant={askOpen ? "soft" : "outline"}
+              size="sm"
+              onClick={() => setAskOpen((o) => !o)}
+              title="Ask questions about this meeting"
+            >
+              Ask
+            </Btn>
+            <select
+              value={note.folder_id ?? ""}
+              onChange={(e) => onMoveNote(e.target.value === "" ? null : e.target.value)}
+              className={`max-w-28 ${SELECT_CLS}`}
+              title="Move to folder"
+            >
+              <option value="">Unfiled</option>
+              {folders.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+            <span className="w-12 shrink-0 text-right text-xs text-mute">
+              {saveState === "saving" ? "saving…" : "saved"}
+            </span>
+          </div>
           <input
             value={title}
             onChange={(e) => {
               setTitle(e.target.value);
               scheduleSave(e.target.value, scratchpad);
             }}
-            className="min-w-0 flex-1 bg-transparent text-xl font-semibold text-zinc-100 outline-none placeholder:text-zinc-600"
+            className="w-full bg-transparent font-display text-[26px] font-bold tracking-tight text-ink outline-none placeholder:text-mute"
             placeholder="Untitled"
           />
-          {!recStatus.active && (
-            <button
-              onClick={onStartRecording}
-              title="Record this meeting (mic + system audio)"
-              className="rounded-md bg-red-600/90 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-500"
-            >
-              ● Record
-            </button>
-          )}
-          {screenStatus.active ? (
-            <button
-              onClick={onStopScreen}
-              title="Stop the screen recording"
-              className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-500"
-            >
-              🖥 {fmtElapsed(screenStatus.elapsed_ms)} ■ Stop
-            </button>
-          ) : (
-            <select
-              value=""
-              onChange={(e) => {
-                const choice = e.target.value;
-                e.target.value = "";
-                if (choice === "full") {
-                  onStartScreen({ kind: "full_screen" });
-                } else if (choice === "window") {
-                  const title = prompt("Exact window title to capture:");
-                  if (title) onStartScreen({ kind: "window", title });
-                } else if (choice === "region") {
-                  const spec = prompt("Region as x,y,width,height:", "0,0,1280,720");
-                  const parts = spec?.split(",").map((n) => parseInt(n.trim(), 10)) ?? [];
-                  if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
-                    onStartScreen({
-                      kind: "region",
-                      x: parts[0],
-                      y: parts[1],
-                      width: parts[2],
-                      height: parts[3],
-                    });
-                  }
-                }
-              }}
-              title="Record the screen (attached to this note)"
-              className="rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-400 outline-none"
-            >
-              <option value="">🖥 Screen…</option>
-              <option value="full">Full screen</option>
-              <option value="window">Window…</option>
-              <option value="region">Region…</option>
-            </select>
-          )}
-          <select
-            value={templateId}
-            onChange={(e) => setTemplateId(e.target.value)}
-            className="max-w-36 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-400 outline-none"
-            title="Template for Enhance"
-          >
-            {templates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => void enhance()}
-            disabled={enhancing}
-            title="Merge your notes with the transcript into structured notes"
-            className="rounded-md bg-indigo-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-60"
-          >
-            {enhancing ? "Enhancing…" : note.blocks.length > 0 ? "✨ Re-enhance" : "✨ Enhance"}
-          </button>
-          <button
-            onClick={() => setAskOpen((o) => !o)}
-            title="Ask questions about this meeting"
-            className={`rounded-md border px-2.5 py-1 text-xs font-medium ${
-              askOpen
-                ? "border-indigo-500 text-indigo-300"
-                : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-            }`}
-          >
-            💬 Ask
-          </button>
-          <select
-            value={note.folder_id ?? ""}
-            onChange={(e) => onMoveNote(e.target.value === "" ? null : e.target.value)}
-            className="max-w-28 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-400 outline-none"
-            title="Move to folder"
-          >
-            <option value="">Unfiled</option>
-            {folders.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.name}
-              </option>
-            ))}
-          </select>
-          <span className="w-12 shrink-0 text-right text-xs text-zinc-600">
-            {saveState === "saving" ? "saving…" : "saved"}
-          </span>
         </div>
 
         {meeting?.recording && (
-          <div className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-900/80 px-6 py-2 text-xs text-zinc-400">
-            <span>🎙 Meeting recording · {fmtElapsed(meeting.recording.duration_ms)}</span>
-            {meeting.recording.mixed_path && (
-              <button
-                className="text-indigo-300 hover:underline"
-                onClick={() => void api.openAttachment(meeting.recording!.mixed_path!)}
-              >
-                ▶ Play
-              </button>
-            )}
-            {meeting.recording.mic_path && (
-              <button
-                className="text-zinc-500 hover:text-zinc-300"
-                title="Reveal recording files"
-                onClick={() => void api.revealAttachment(meeting.recording!.mic_path!)}
-              >
-                📂 Files
-              </button>
-            )}
+          <div className="border-b border-line px-6 py-2">
+            <div className="flex items-center gap-2 rounded-[12px] border border-line bg-peach-2 px-3 py-1.5">
+              <span className="text-[12.5px] text-ink-2">Meeting recording</span>
+              <span className="font-mono text-[11px] text-mute">
+                {fmtElapsed(meeting.recording.duration_ms)}
+              </span>
+              {meeting.recording.mixed_path && (
+                <Btn
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => void api.openAttachment(meeting.recording!.mixed_path!)}
+                >
+                  Play
+                </Btn>
+              )}
+              {meeting.recording.mic_path && (
+                <Btn
+                  variant="ghost"
+                  size="xs"
+                  title="Reveal recording files"
+                  onClick={() => void api.revealAttachment(meeting.recording!.mic_path!)}
+                >
+                  Files
+                </Btn>
+              )}
+            </div>
           </div>
         )}
 
@@ -316,24 +332,26 @@ export default function Editor({
         )}
 
         {enhanceError && (
-          <div className="border-b border-red-900/50 bg-red-950/40 px-6 py-1.5 text-xs text-red-300">
+          <div className="mx-6 my-2 rounded-[12px] border border-line bg-peach-2 p-3 text-[13px] text-clay">
             ⚠ {enhanceError}
           </div>
         )}
 
         {note.blocks.length > 0 && (
-          <div className="flex gap-1 border-b border-zinc-800 px-6 pt-2">
+          <div className="flex gap-5 border-b border-line px-6">
             {(
               [
                 ["scratch", "Scratchpad"],
-                ["enhanced", "Enhanced ✨"],
+                ["enhanced", "Enhanced"],
               ] as const
             ).map(([id, label]) => (
               <button
                 key={id}
                 onClick={() => setView(id)}
-                className={`rounded-t-md px-3 py-1.5 text-xs font-medium ${
-                  view === id ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+                className={`-mb-px cursor-pointer border-b-2 bg-transparent px-0.5 py-2 text-[13px] font-semibold transition-colors ${
+                  view === id
+                    ? "border-coral text-ink"
+                    : "border-transparent text-mute hover:text-ink-2"
                 }`}
               >
                 {label}
@@ -353,39 +371,37 @@ export default function Editor({
             }}
             onPaste={handlePaste}
             placeholder="Jot rough notes here during the meeting — then hit Enhance to merge them with the transcript."
-            className="flex-1 resize-none bg-transparent px-6 py-4 font-mono text-sm leading-6 text-zinc-200 outline-none placeholder:text-zinc-600"
+            className="flex-1 resize-none bg-transparent px-6 py-4 text-[15px] leading-[1.75] text-ink outline-none placeholder:text-mute"
           />
         )}
 
-        <div className="border-t border-zinc-800 px-6 py-3">
+        <div className="border-t border-line px-6 py-3">
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => void attach()}
-              className="rounded-md border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-800"
-            >
-              📎 Attach file
-            </button>
+            <Btn variant="outline" size="sm" onClick={() => void attach()}>
+              Attach file
+            </Btn>
             {note.attachments.map((a) => (
               <span
                 key={a.id}
-                className="group flex items-center gap-1.5 rounded-md bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+                className="flex items-center gap-1 rounded-[12px] border border-line bg-peach-2 py-1 pl-2.5 pr-1"
               >
                 <button
-                  className="hover:text-indigo-300"
+                  className="cursor-pointer text-[12.5px] text-ink-2 hover:text-clay"
                   title="Open"
                   onClick={() => void api.openAttachment(a.rel_path)}
                 >
                   {a.file_name}
                 </button>
-                <button
-                  className="text-zinc-500 hover:text-zinc-200"
+                <Btn
+                  variant="ghost"
+                  size="xs"
                   title="Reveal in Explorer"
                   onClick={() => void api.revealAttachment(a.rel_path)}
                 >
-                  📂
-                </button>
+                  Reveal
+                </Btn>
                 <button
-                  className="text-zinc-500 hover:text-red-400"
+                  className="cursor-pointer rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-mute transition-colors hover:bg-peach hover:text-rec"
                   title="Remove attachment"
                   onClick={() => void removeAttachment(a.id)}
                 >

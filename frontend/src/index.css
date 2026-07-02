@@ -108,3 +108,12 @@ body {
     background-position: -200% 0;
   }
 }
+@keyframes wave {
+  0%,
+  100% {
+    transform: scaleY(0.32);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
