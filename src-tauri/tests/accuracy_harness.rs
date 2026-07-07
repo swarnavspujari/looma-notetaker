@@ -121,10 +121,7 @@ fn report(t: &Transcript) {
             );
         }
         let max_reps = runs.iter().map(|r| r.reps).max().unwrap_or(1);
-        worst.insert(
-            format!("worst_reps_{label}"),
-            serde_json::json!(max_reps),
-        );
+        worst.insert(format!("worst_reps_{label}"), serde_json::json!(max_reps));
     }
 
     let metrics = serde_json::json!({
@@ -179,6 +176,14 @@ fn stage_channel(src: &Path, dst: &Path, max_secs: Option<u64>) -> Result<u64, S
 #[test]
 #[ignore = "offline accuracy harness; needs artifacts + a recording, see file docs"]
 fn accuracy_harness() {
+    // surface pipeline logs (e.g. collapsed-loop warnings) on stderr
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "looma_app_lib=debug,looma_asr=debug".into()),
+        )
+        .try_init();
+
     // ---- score-only mode: metrics for an exported transcript JSON ----
     if let Ok(json_path) = std::env::var("LOOMA_HARNESS_SCORE_JSON") {
         let raw = std::fs::read_to_string(&json_path).expect("read score json");
@@ -197,8 +202,8 @@ fn accuracy_harness() {
     assert!(mic_src.exists(), "missing {}", mic_src.display());
     assert!(sys_src.exists(), "missing {}", sys_src.display());
 
-    let model = std::env::var("LOOMA_HARNESS_MODEL")
-        .unwrap_or_else(|_| "ggml-large-v3-turbo-q5_0".into());
+    let model =
+        std::env::var("LOOMA_HARNESS_MODEL").unwrap_or_else(|_| "ggml-large-v3-turbo-q5_0".into());
     let max_secs = std::env::var("LOOMA_HARNESS_MAX_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok());
@@ -213,7 +218,10 @@ fn accuracy_harness() {
         format!("models/asr/{model}.bin"),
     ];
     if let Some(missing) = needed.iter().find(|p| !real_data.join(p).exists()) {
-        panic!("artifact not installed: {}", real_data.join(missing).display());
+        panic!(
+            "artifact not installed: {}",
+            real_data.join(missing).display()
+        );
     }
 
     let tmp = tempfile::tempdir().unwrap();
@@ -264,8 +272,12 @@ fn accuracy_harness() {
 
     let started = std::time::Instant::now();
     let on_stage = |p: looma_app_lib::pipeline::PipelineProgress| {
-        eprintln!("[{:>6.1}s] stage: {} {}", started.elapsed().as_secs_f32(), p.stage,
-            p.detail.unwrap_or_default())
+        eprintln!(
+            "[{:>6.1}s] stage: {} {}",
+            started.elapsed().as_secs_f32(),
+            p.stage,
+            p.detail.unwrap_or_default()
+        )
     };
     let on_model = |p: looma_app_lib::models::ModelProgress| eprintln!("model: {}", p.stage);
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -278,6 +290,12 @@ fn accuracy_harness() {
         ))
         .expect("pipeline should succeed");
     eprintln!("pipeline took {:.1}s", started.elapsed().as_secs_f32());
+
+    // keep the produced transcript for spot-checking against the audio
+    if let Ok(out) = std::env::var("LOOMA_HARNESS_OUT_JSON") {
+        std::fs::write(&out, serde_json::to_string_pretty(&transcript).unwrap()).unwrap();
+        eprintln!("transcript written to {out}");
+    }
 
     report(&transcript);
 }
