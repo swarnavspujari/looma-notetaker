@@ -11,10 +11,11 @@
 
 use std::path::{Path, PathBuf};
 
-use looma_asr::{TranscribeOptions, TranscriptionEngine};
+use looma_asr::{RawTranscript, TranscribeOptions, TranscriptionEngine};
 use looma_core::align::{
     align_words_to_speakers, merge_channel_segments, segments_from_single_speaker, AlignOptions,
 };
+use looma_core::repeat::collapse_loops;
 use looma_core::{Speaker, Transcript};
 use looma_diarize::{DiarizationEngine, DiarizeOptions};
 use serde::Serialize;
@@ -240,10 +241,12 @@ pub async fn run_with(
             "transcribing",
             Some("your microphone".into()),
         );
-        let mic_raw = asr
-            .transcribe(&mic_16k, &opts)
-            .await
-            .map_err(|e| e.to_string())?;
+        let mic_raw = guard_loops(
+            asr.transcribe(&mic_16k, &opts)
+                .await
+                .map_err(|e| e.to_string())?,
+            "mic",
+        );
         language = language.or(mic_raw.language.clone());
 
         emit_stage(
@@ -253,10 +256,12 @@ pub async fn run_with(
             "transcribing",
             Some("other participants".into()),
         );
-        let sys_raw = asr
-            .transcribe(&sys_16k, &opts)
-            .await
-            .map_err(|e| e.to_string())?;
+        let sys_raw = guard_loops(
+            asr.transcribe(&sys_16k, &opts)
+                .await
+                .map_err(|e| e.to_string())?,
+            "system",
+        );
         language = language.or(sys_raw.language.clone());
 
         emit_stage(state, on_stage, meeting_id, "diarizing", None);
@@ -284,10 +289,12 @@ pub async fn run_with(
         let track_16k = prep(&src, "track.16k.wav")?;
 
         emit_stage(state, on_stage, meeting_id, "transcribing", None);
-        let raw = asr
-            .transcribe(&track_16k, &opts)
-            .await
-            .map_err(|e| e.to_string())?;
+        let raw = guard_loops(
+            asr.transcribe(&track_16k, &opts)
+                .await
+                .map_err(|e| e.to_string())?,
+            "mixed",
+        );
         language = raw.language.clone();
 
         emit_stage(state, on_stage, meeting_id, "diarizing", None);
@@ -321,6 +328,25 @@ pub async fn run_with(
     // release the per-meeting guard for direct callers (run() also clears it)
     state.pipeline_stage.lock().unwrap().remove(meeting_id);
     Ok(transcript)
+}
+
+/// Engine-agnostic hallucination guard: collapse consecutive-repetition loops
+/// in the raw word stream (whisper and cloud engines both produce them) so a
+/// stuck decoder can never flood a transcript. Collapses are logged — they
+/// are evidence of an upstream decoding problem worth seeing in the logs.
+fn guard_loops(raw: RawTranscript, channel: &str) -> RawTranscript {
+    let (words, runs) = collapse_loops(raw.words);
+    for run in &runs {
+        tracing::warn!(
+            channel,
+            phrase = %run.phrase,
+            reps = run.reps,
+            start_ms = run.start_ms,
+            end_ms = run.end_ms,
+            "collapsed ASR repetition loop"
+        );
+    }
+    RawTranscript { words, ..raw }
 }
 
 /// Register display labels for every speaker key seen in the segments
