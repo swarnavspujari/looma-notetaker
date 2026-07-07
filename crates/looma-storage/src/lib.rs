@@ -11,6 +11,7 @@
 
 mod attachments;
 mod folders;
+mod jobs;
 mod meetings;
 mod notes;
 mod search;
@@ -18,6 +19,7 @@ mod settings;
 mod templates;
 mod transcripts;
 
+pub use jobs::{TranscriptionJob, JOB_DONE, JOB_FAILED, JOB_QUEUED, JOB_RUNNING};
 pub use notes::NoteSummary;
 pub use search::{SearchHit, SearchHitKind};
 
@@ -124,6 +126,17 @@ impl Storage {
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+
+            -- Pending/failed transcription pipeline runs (see jobs.rs).
+            -- meeting_id only: recording paths are resolved at execution time.
+            CREATE TABLE IF NOT EXISTS transcription_jobs (
+                meeting_id TEXT PRIMARY KEY,
+                status     TEXT NOT NULL DEFAULT 'queued',
+                attempts   INTEGER NOT NULL DEFAULT 0,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );
 
             -- Full-text search. Kept in sync by the write paths in this crate.
