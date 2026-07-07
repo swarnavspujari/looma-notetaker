@@ -17,6 +17,7 @@ interface Props {
 }
 
 const STAGE_LABELS: Record<string, string> = {
+  waiting: "Waiting to transcribe (recording comes first)…",
   starting: "Starting…",
   "ensuring-models": "Preparing models…",
   "preparing-audio": "Preparing audio…",
