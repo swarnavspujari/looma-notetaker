@@ -49,6 +49,21 @@ const TOOLS: &[Artifact] = &[
         dest_rel: "bin/whisper",
         probe_rel: "bin/whisper/Release/whisper-cli.exe",
     },
+    // Upstream publishes no Vulkan Windows binary (only CPU/BLAS/CUDA-only),
+    // so this is whisper.cpp v1.9.1 (f049fff) built with -DGGML_VULKAN=1 and
+    // hosted as a tools release on this repo — one cross-vendor GPU build for
+    // NVIDIA/AMD/Intel. Selection is gated by a per-machine benchmark
+    // (gpu.rs); the CPU entry above stays the default and is never touched.
+    Artifact {
+        id: "whisper-bin-vulkan",
+        display: "whisper.cpp CLI (Vulkan GPU, v1.9.1)",
+        url: "https://github.com/swarnavspujari/looma-notetaker/releases/download/tools-whisper-vulkan-v1.9.1/whisper-bin-x64-vulkan-v1.9.1.zip",
+        sha256: "9dbd3ab65394a26784d79ae495de36311925f1f489a6e0e905841b6076799973",
+        bytes: 23_632_146,
+        kind: ArtifactKind::Archive,
+        dest_rel: "bin/whisper-vulkan",
+        probe_rel: "bin/whisper-vulkan/Release/whisper-cli.exe",
+    },
     Artifact {
         id: "sherpa-bin",
         display: "sherpa-onnx diarization CLI (v1.13.3)",

@@ -47,7 +47,13 @@ pub fn detect() -> HwInfo {
     let ram_gb = sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
     let cpu_cores = sys.cpus().len().max(1);
 
-    let (gpu_name, vram_mb) = detect_nvidia();
+    // NVIDIA first (nvidia-smi also reports VRAM, which drives the tier
+    // recommendation); otherwise fall back to a vendor-neutral name so
+    // Settings can show what the Vulkan GPU path (gpu.rs) would run on.
+    let (gpu_name, vram_mb) = match detect_nvidia() {
+        (Some(name), vram) => (Some(name), vram),
+        _ => (detect_any_gpu_name(), None),
+    };
 
     // §6.2: NVIDIA ≥8 GB VRAM (or strong CPU + ≥16 GB RAM) → Best;
     // ≤8 GB RAM → Light; otherwise Balanced. Cloud is opt-in only.
@@ -87,6 +93,34 @@ fn detect_nvidia() -> (Option<String>, Option<u64>) {
         }
     }
     (None, None)
+}
+
+/// Vendor-neutral GPU name (Intel/AMD iGPUs have no nvidia-smi). Display
+/// only — no VRAM figure, so it never changes the recommended tier. Windows
+/// queries WMI through PowerShell (`wmic` is gone on Windows 11); other
+/// platforms return None (macOS hardware is uniform enough not to matter).
+fn detect_any_gpu_name() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let out = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "(Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name) -join \"`n\"",
+            ])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout);
+        text.lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty() && !l.contains("Microsoft Basic"))
+            .map(str::to_string)
+    }
+    #[cfg(not(target_os = "windows"))]
+    None
 }
 
 /// Default whisper model for a tier (spec §6.2 + docs/MODELS.md).
