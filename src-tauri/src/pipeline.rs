@@ -21,7 +21,7 @@ use looma_diarize::{DiarizationEngine, DiarizeOptions};
 use serde::Serialize;
 
 use crate::state::AppState;
-use crate::{hw, models};
+use crate::{gpu, hw, models};
 
 pub const MIC_SPEAKER_KEY: &str = "mic";
 
@@ -106,7 +106,7 @@ pub async fn run_with(
     }
 
     // ---- settings → engines ----
-    let (tier, use_groq, max_quality, model_override, language_setting) = {
+    let (tier, use_groq, max_quality, model_override, language_setting, use_gpu) = {
         let storage = state.storage.lock().unwrap();
         let get = |k: &str| storage.get_setting(k).ok().flatten();
         (
@@ -117,6 +117,7 @@ pub async fn run_with(
             get("asr.max_quality").as_deref() == Some("true"),
             get("asr.model_id").filter(|s| !s.is_empty()),
             get("asr.language").filter(|s| !s.is_empty()),
+            gpu::enabled(&storage),
         )
     };
 
@@ -135,13 +136,30 @@ pub async fn run_with(
 
     let threads = sidecar_threads();
 
-    let asr: Box<dyn TranscriptionEngine> = if use_groq || tier == "cloud" {
+    // Meetings are transcribed in a fixed language ("asr.language" setting,
+    // default English, "auto" opts back into detection). Auto-detect on a
+    // language-less window (silence, noise) destabilizes whisper decoding —
+    // it was part of how a real meeting collapsed into a hallucination loop.
+    let language = match language_setting.as_deref() {
+        Some("auto") => None,
+        Some(lang) => Some(lang.to_string()),
+        None => Some("en".to_string()),
+    };
+    let opts = TranscribeOptions {
+        language,
+        prompt: None,
+        // decode 30 s windows independently: one bad window must never poison
+        // the rest of the recording (observed: a loop consumed 63 minutes)
+        max_context: Some(0),
+    };
+
+    let asr: GuardedAsr = if use_groq || tier == "cloud" {
         let key = state
             .secrets
             .get(looma_secrets::keys::GROQ_API_KEY)
             .map_err(|e| e.to_string())?
             .ok_or("Groq transcription is enabled but no Groq API key is set")?;
-        Box::new(looma_asr::groq::GroqEngine::new(key))
+        GuardedAsr::single(Box::new(looma_asr::groq::GroqEngine::new(key)))
     } else {
         let model_id = model_override
             .unwrap_or_else(|| hw::default_model_for_tier(&tier, max_quality).to_string());
@@ -156,11 +174,71 @@ pub async fn run_with(
         )
         .await?;
         let model_path = models::ensure(on_model, &data_dir, &model_id).await?;
-        Box::new(looma_asr::whisper_cpp::WhisperCppEngine {
-            exe: whisper_exe,
-            model: model_path,
-            threads,
-        })
+
+        // GPU offload. Windows: the pinned Vulkan build, but only when a
+        // one-time benchmark measured it faster on this machine (gpu.rs);
+        // any failure falls back to the CPU engine below. macOS/Linux:
+        // whisper.cpp builds there default to Metal/GPU on their own, so
+        // asr.use_gpu only gates a force-to-CPU flag and nothing else about
+        // the shipped path changes.
+        #[cfg(target_os = "windows")]
+        let gpu_exe: Option<PathBuf> = if use_gpu {
+            let sample_src = mic_wav
+                .as_ref()
+                .or(system_wav.as_ref())
+                .or(mixed_wav.as_ref())
+                .expect("checked above: at least one recording file exists");
+            emit_stage(state, on_stage, meeting_id, "benchmarking", None);
+            let notify = |detail: String| {
+                emit_stage(state, on_stage, meeting_id, "benchmarking", Some(detail));
+            };
+            gpu::plan(
+                state,
+                on_model,
+                &notify,
+                gpu::PlanRequest {
+                    cpu_exe: &whisper_exe,
+                    model_path: &model_path,
+                    model_id: &model_id,
+                    threads,
+                    opts: &opts,
+                    sample_src,
+                },
+            )
+            .await
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "windows"))]
+        let gpu_exe: Option<PathBuf> = None;
+
+        match gpu_exe {
+            Some(exe) => GuardedAsr::with_cpu_fallback(
+                Box::new(looma_asr::whisper_cpp::WhisperCppEngine {
+                    exe,
+                    model: model_path.clone(),
+                    threads,
+                    force_cpu: false,
+                }),
+                "whisper.cpp-vulkan",
+                Box::new(looma_asr::whisper_cpp::WhisperCppEngine {
+                    exe: whisper_exe,
+                    model: model_path,
+                    threads,
+                    force_cpu: false,
+                }),
+                model_id,
+            ),
+            None => GuardedAsr::single(Box::new(looma_asr::whisper_cpp::WhisperCppEngine {
+                exe: whisper_exe,
+                model: model_path,
+                threads,
+                // On a GPU-capable build (Metal on macOS) honor the off
+                // switch; the Windows CPU build has no GPU backend and
+                // ignores it.
+                force_cpu: !use_gpu,
+            })),
+        }
     };
     let diarizer = looma_diarize::sherpa::SherpaDiarizeEngine {
         exe: sherpa_exe,
@@ -189,26 +267,16 @@ pub async fn run_with(
         Ok(dst)
     };
 
-    // Meetings are transcribed in a fixed language ("asr.language" setting,
-    // default English, "auto" opts back into detection). Auto-detect on a
-    // language-less window (silence, noise) destabilizes whisper decoding —
-    // it was part of how a real meeting collapsed into a hallucination loop.
-    let language = match language_setting.as_deref() {
-        Some("auto") => None,
-        Some(lang) => Some(lang.to_string()),
-        None => Some("en".to_string()),
-    };
-    let opts = TranscribeOptions {
-        language,
-        prompt: None,
-        // decode 30 s windows independently: one bad window must never poison
-        // the rest of the recording (observed: a loop consumed 63 minutes)
-        max_context: Some(0),
-    };
     let align_opts = AlignOptions::default();
     let mut language = None;
     let mut channels: Vec<Vec<looma_core::TranscriptSegment>> = Vec::new();
     let mut speakers: Vec<Speaker> = Vec::new();
+
+    // A GPU failure mid-transcription surfaces as a one-line detail and the
+    // batch retries on CPU (GuardedAsr) — the meeting always gets its
+    // transcript.
+    let on_fallback =
+        |detail: String| emit_stage(state, on_stage, meeting_id, "transcribing", Some(detail));
 
     if per_channel {
         let mic_16k = prep(mic_wav.as_ref().unwrap(), "mic.16k.wav")?;
@@ -222,12 +290,7 @@ pub async fn run_with(
             "transcribing",
             Some("your microphone".into()),
         );
-        let mic_raw = guard_loops(
-            asr.transcribe(&mic_16k, &opts)
-                .await
-                .map_err(|e| e.to_string())?,
-            "mic",
-        );
+        let mic_raw = guard_loops(asr.transcribe(&mic_16k, &opts, &on_fallback).await?, "mic");
         language = language.or(mic_raw.language.clone());
 
         emit_stage(
@@ -238,9 +301,7 @@ pub async fn run_with(
             Some("other participants".into()),
         );
         let sys_raw = guard_loops(
-            asr.transcribe(&sys_16k, &opts)
-                .await
-                .map_err(|e| e.to_string())?,
+            asr.transcribe(&sys_16k, &opts, &on_fallback).await?,
             "system",
         );
         language = language.or(sys_raw.language.clone());
@@ -274,9 +335,7 @@ pub async fn run_with(
 
         emit_stage(state, on_stage, meeting_id, "transcribing", None);
         let raw = guard_loops(
-            asr.transcribe(&track_16k, &opts)
-                .await
-                .map_err(|e| e.to_string())?,
+            asr.transcribe(&track_16k, &opts, &on_fallback).await?,
             "mixed",
         );
         language = raw.language.clone();
@@ -295,10 +354,17 @@ pub async fn run_with(
         channels.push(segments);
     }
 
+    // A GPU that failed mid-run gets pinned back to CPU so the next meeting
+    // doesn't hit the same failure (toggling the setting re-tests).
+    if let Some((model_id, error)) = asr.runtime_failure() {
+        let storage = state.storage.lock().unwrap();
+        gpu::record_runtime_failure(&storage, &model_id, &error);
+    }
+
     let transcript = Transcript {
         meeting_id: meeting_id.to_string(),
         language,
-        engine: asr.id().to_string(),
+        engine: asr.engine_id(),
         segments: merge_channel_segments(channels),
         speakers,
     };
@@ -323,6 +389,98 @@ pub async fn run_with(
     // release the per-meeting guard (on failure the scheduler clears it)
     state.pipeline_stage.lock().unwrap().remove(meeting_id);
     Ok(transcript)
+}
+
+/// The pipeline's ASR with an automatic, visible CPU fallback: a GPU engine
+/// that fails to launch, exits nonzero, or OOMs must never sink the pipeline.
+/// The failed batch is retried on the validated CPU engine and the rest of
+/// the run stays there; the failure is reported via `runtime_failure` so the
+/// machine gets pinned back to CPU for future meetings.
+struct GuardedAsr {
+    primary: Box<dyn TranscriptionEngine>,
+    /// `Transcript::engine` label while the primary is healthy — the trait
+    /// `id()` can't tell the Vulkan build from the CPU one (same engine).
+    primary_label: Option<&'static str>,
+    cpu_fallback: Option<Box<dyn TranscriptionEngine>>,
+    /// Model the GPU decision was made for (verdict re-pinning on failure).
+    gpu_model_id: Option<String>,
+    failure: std::sync::Mutex<Option<String>>,
+}
+
+impl GuardedAsr {
+    fn single(engine: Box<dyn TranscriptionEngine>) -> Self {
+        Self {
+            primary: engine,
+            primary_label: None,
+            cpu_fallback: None,
+            gpu_model_id: None,
+            failure: std::sync::Mutex::new(None),
+        }
+    }
+
+    fn with_cpu_fallback(
+        primary: Box<dyn TranscriptionEngine>,
+        primary_label: &'static str,
+        cpu: Box<dyn TranscriptionEngine>,
+        gpu_model_id: String,
+    ) -> Self {
+        Self {
+            primary,
+            primary_label: Some(primary_label),
+            cpu_fallback: Some(cpu),
+            gpu_model_id: Some(gpu_model_id),
+            failure: std::sync::Mutex::new(None),
+        }
+    }
+
+    fn failed_over(&self) -> bool {
+        self.failure.lock().unwrap().is_some()
+    }
+
+    /// What actually transcribed this meeting, for `Transcript::engine`.
+    fn engine_id(&self) -> String {
+        if self.failed_over() {
+            if let Some(cpu) = &self.cpu_fallback {
+                return cpu.id().to_string();
+            }
+        }
+        self.primary_label.unwrap_or(self.primary.id()).to_string()
+    }
+
+    /// (model_id, error) when the GPU primary failed during this run.
+    fn runtime_failure(&self) -> Option<(String, String)> {
+        let failure = self.failure.lock().unwrap().clone()?;
+        Some((self.gpu_model_id.clone()?, failure))
+    }
+
+    async fn transcribe(
+        &self,
+        wav: &Path,
+        opts: &TranscribeOptions,
+        notify: &(dyn Fn(String) + Send + Sync),
+    ) -> Result<RawTranscript, String> {
+        if !self.failed_over() {
+            return match self.primary.transcribe(wav, opts).await {
+                Ok(raw) => Ok(raw),
+                Err(e) => {
+                    let Some(cpu) = &self.cpu_fallback else {
+                        return Err(e.to_string());
+                    };
+                    let msg = e.to_string();
+                    tracing::warn!(error = %msg, "GPU transcription failed — falling back to CPU");
+                    notify("GPU transcription failed — continuing on CPU".into());
+                    *self.failure.lock().unwrap() = Some(msg);
+                    cpu.transcribe(wav, opts).await.map_err(|e| e.to_string())
+                }
+            };
+        }
+        self.cpu_fallback
+            .as_ref()
+            .expect("failed_over implies a fallback engine")
+            .transcribe(wav, opts)
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Engine-agnostic hallucination guard: collapse consecutive-repetition loops

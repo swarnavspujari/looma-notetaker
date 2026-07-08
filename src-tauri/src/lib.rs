@@ -4,6 +4,7 @@
 mod asr_commands;
 mod calendar_commands;
 mod commands;
+pub mod gpu;
 pub mod hw;
 mod import_commands;
 mod live;

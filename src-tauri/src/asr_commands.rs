@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 
 use crate::state::AppState;
-use crate::{hw, models, scheduler};
+use crate::{gpu, hw, models, scheduler};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -80,6 +80,9 @@ pub struct AsrSettings {
     pub max_quality: bool,
     pub has_groq_key: bool,
     pub auto_transcribe: bool,
+    pub use_gpu: bool,
+    /// This machine's one-time GPU-vs-CPU benchmark verdict, if it ran.
+    pub gpu_bench: Option<gpu::GpuBench>,
     pub hw: hw::HwInfo,
     pub models: Vec<ModelStatus>,
 }
@@ -131,6 +134,8 @@ pub async fn get_asr_settings(state: State<'_, AppState>) -> CmdResult<AsrSettin
             .flatten()
             .is_some(),
         auto_transcribe: get("asr.auto_transcribe").as_deref() != Some("false"),
+        use_gpu: gpu::enabled(&storage),
+        gpu_bench: gpu::stored(&storage),
         hw: hw_info,
         models,
     })
@@ -143,6 +148,7 @@ pub struct AsrSettingsUpdate {
     pub use_groq: bool,
     pub max_quality: bool,
     pub auto_transcribe: bool,
+    pub use_gpu: bool,
     /// Some("") clears the stored key; None leaves it untouched.
     pub groq_key: Option<String>,
 }
@@ -183,6 +189,21 @@ pub fn set_asr_settings(state: State<'_, AppState>, update: AsrSettingsUpdate) -
                 } else {
                     "false"
                 },
+            )
+            .map_err(|e| e.to_string())?;
+        // Turning GPU off→on is the "try again" gesture: clear the stored
+        // benchmark verdict so the next transcription re-measures (a failed
+        // or slow GPU verdict would otherwise stick forever).
+        let was_on = gpu::enabled(&storage);
+        if update.use_gpu && !was_on {
+            storage
+                .set_setting(gpu::BENCH_KEY, "")
+                .map_err(|e| e.to_string())?;
+        }
+        storage
+            .set_setting(
+                gpu::USE_GPU_KEY,
+                if update.use_gpu { "true" } else { "false" },
             )
             .map_err(|e| e.to_string())?;
     }

@@ -125,10 +125,17 @@ async fn run(app: tauri::AppHandle, meeting_id: String, out_dir: PathBuf, stop: 
     let threads = std::thread::available_parallelism()
         .map(|n| (n.get() / 4).clamp(2, 4))
         .unwrap_or(2);
+    // The live loop deliberately stays off the GPU offload path (gpu.rs is
+    // post-meeting only): it runs DURING capture, exactly when the GPU is
+    // busy with the video call / screen share, and mid-meeting contention is
+    // the one regression this app can't afford. On Windows that means the
+    // CPU whisper build resolved above; on macOS this invocation is
+    // unchanged from what shipped (brew builds default to Metal there).
     let engine = looma_asr::whisper_cpp::WhisperCppEngine {
         exe,
         model,
         threads,
+        force_cpu: false,
     };
     let _ = app.emit(
         "live:status",
