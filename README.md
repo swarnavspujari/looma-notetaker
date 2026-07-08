@@ -14,14 +14,17 @@ In the spirit of Granola, but private by default:
 - **Bring your own models & keys** — whisper.cpp locally, or NVIDIA NIM / OpenAI / Anthropic /
   local Ollama for note enhancement.
 - **Who-said-what** — speaker diarization always runs locally (sherpa-onnx), on every hardware tier.
+- **Uses your GPU when it's faster** — post-meeting transcription runs on whatever GPU you have
+  (NVIDIA/AMD/Intel via one Vulkan build, Apple via Metal), but only after a one-time speed test
+  proves it beats your CPU on your machine; it silently stays on CPU otherwise. *(from v0.3.0)*
 - **Your calendars** — Google Calendar & Microsoft 365, one-click meeting start. *(from M5)*
 - **MCP server** — chat with your notes from Claude Desktop or any MCP client. *(from M6)*
 
-> **Status: v0.2.0.** Fifteen milestones (`m0`…`m14`) are in — recording, local
-> transcription + diarization, enhance with provenance, templates, Ask, calendars, MCP,
-> screen recording, file import, the warm design-system UI, live partial transcript while
-> you record, note export, installers for Windows/macOS/Linux, and Linux system-audio
-> capture. See [DECISIONS.md](DECISIONS.md) for the build story.
+> **Status: v0.3.0.** Recording, local transcription + diarization (with optional cross-vendor
+> GPU acceleration), enhance with provenance, templates, Ask, calendars, MCP, screen recording,
+> file import, the warm design-system UI, live partial transcript while you record, note export,
+> auto-updating installers for Windows/macOS/Linux, and Linux system-audio capture. See
+> [DECISIONS.md](DECISIONS.md) for the build story.
 
 ## A two-minute tour
 
