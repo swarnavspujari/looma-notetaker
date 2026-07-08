@@ -296,9 +296,7 @@ fn align_tokens(r: &[&str], h: &[&str]) -> Vec<Op> {
     let mut back = vec![0u8; (n + 1) * w]; // 0=diag-match,1=diag-sub,2=up-del,3=left-ins
     let mut prev: Vec<u32> = (0..=m as u32).collect();
     let mut cur = vec![0u32; m + 1];
-    for j in 1..=m {
-        back[j] = 3;
-    }
+    back[1..=m].fill(3);
     for i in 1..=n {
         cur[0] = i as u32;
         back[i * w] = 2;
@@ -721,7 +719,7 @@ async fn groq_transcribe_channel(
         .map(|s| ((s * 16_000) as usize).min(samples.len()))
         .unwrap_or(samples.len());
     let samples = &samples[..take];
-    let total_ms = samples.len() as u64 * 1000 / 16;
+    let total_ms = samples.len() as u64 / 16; // 16 samples per ms at 16 kHz
     let cache_dir = std::env::var("LOOMA_HARNESS_GROQ_CACHE").ok().map(|d| {
         let d = std::path::PathBuf::from(d);
         std::fs::create_dir_all(&d).expect("create groq cache dir");
