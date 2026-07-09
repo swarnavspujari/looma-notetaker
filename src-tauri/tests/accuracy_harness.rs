@@ -157,8 +157,19 @@ fn report(t: &Transcript) {
 // Reference scoring (vs a Fathom .txt export)
 // ---------------------------------------------------------------------------
 
+/// Unambiguous non-lexical fillers dropped from BOTH the reference and the
+/// hypothesis token streams. The human-verified reference dropped its "um"s,
+/// so without this the ASR's fillers score as insertions and the WER is
+/// meaningless. Kept deliberately narrow (never a content word) — a bare "a"
+/// or "so" is a real word and must survive.
+fn is_filler(tok: &str) -> bool {
+    matches!(tok, "um" | "uh" | "mm" | "mhm" | "hmm" | "erm")
+}
+
 /// Split into lowercase alphanumeric tokens (apostrophes dropped, other
 /// punctuation splits): "back-to-back" → [back, to, back], "It's" → [its].
+/// Non-lexical fillers (see `is_filler`) are stripped so both sides score
+/// against the same filler-free vocabulary.
 fn tokenize(s: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -172,6 +183,7 @@ fn tokenize(s: &str) -> Vec<String> {
     if !cur.is_empty() {
         out.push(cur);
     }
+    out.retain(|t| !is_filler(t));
     out
 }
 
@@ -479,10 +491,15 @@ fn score_against_reference(t: &Transcript, ref_path: &str) {
     );
 
     let mic_vs_you = score_channel(&ref_you, &mic);
+    // Diagnostic 0 crux: how well did the MIC transcribe the far-end speaker?
+    // Compare this against `system vs ref[others]` to decide which channel's
+    // copy of the far-end to keep when de-duplicating cross-talk.
+    let mic_vs_others = score_channel(&ref_others, &mic);
     let mic_vs_all = score_channel(&reference.tokens, &mic);
     let sys_vs_others = score_channel(&ref_others, &system);
     let sys_vs_all = score_channel(&reference.tokens, &system);
     eprintln!("mic    vs ref[you]:    {}", mic_vs_you.line());
+    eprintln!("mic    vs ref[others]: {}", mic_vs_others.line());
     eprintln!("mic    vs ref[all]:    {}", mic_vs_all.line());
     eprintln!("system vs ref[others]: {}", sys_vs_others.line());
     eprintln!("system vs ref[all]:    {}", sys_vs_all.line());
@@ -589,6 +606,7 @@ fn score_against_reference(t: &Transcript, ref_path: &str) {
         "ref_words": n,
         "ref_words_you": ref_you.len(),
         "wer_mic_vs_you": mic_vs_you.wer(),
+        "wer_mic_vs_others": mic_vs_others.wer(),
         "wer_mic_vs_all": mic_vs_all.wer(),
         "wer_system_vs_others": sys_vs_others.wer(),
         "wer_system_vs_all": sys_vs_all.wer(),
