@@ -314,13 +314,39 @@ pub async fn run_with(
                 .map_err(|e| e.to_string())?,
         );
 
+        // Cross-talk de-dup (§6.4, E1). Without a headset the built-in mic
+        // re-captures the far-end played through the speakers, so the far-end
+        // is transcribed on BOTH channels — double-counted and mislabelled
+        // "You" on merge. Split into a clean near ("you") stream and one
+        // far-end stream, keeping each duplicated run once from the better
+        // source (measured: the system loopback). Genuine talk-over — DIFFERENT
+        // words on the two channels at the same instant — has no cross-channel
+        // token match and survives.
+        let split = looma_core::crosstalk::split_crosstalk(
+            &mic_raw.words,
+            &sys_raw.words,
+            &looma_core::crosstalk::CrosstalkOptions::default(),
+        );
+        let echo_dropped = mic_raw.words.len().saturating_sub(split.you_words.len());
+        if echo_dropped > 0 {
+            tracing::info!(
+                echo_dropped,
+                mic_words = mic_raw.words.len(),
+                "removed far-end cross-talk from the mic channel before alignment"
+            );
+        }
+
         emit_stage(state, on_stage, meeting_id, "aligning", None);
         channels.push(segments_from_single_speaker(
-            &mic_raw.words,
+            &split.you_words,
             MIC_SPEAKER_KEY,
             &align_opts,
         ));
-        channels.push(align_words_to_speakers(&sys_raw.words, &turns, &align_opts));
+        channels.push(align_words_to_speakers(
+            &split.far_words,
+            &turns,
+            &align_opts,
+        ));
 
         speakers.push(Speaker {
             key: MIC_SPEAKER_KEY.into(),
