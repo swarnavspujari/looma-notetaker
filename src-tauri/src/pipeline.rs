@@ -528,24 +528,66 @@ fn guard_loops(raw: RawTranscript, channel: &str) -> RawTranscript {
     RawTranscript { words, ..raw }
 }
 
-/// Register display labels for every speaker key seen in the segments
-/// ("spk_0" → "Speaker 1", fallback speaker → "Unknown").
+/// Register display labels for every speaker key seen in the segments.
+/// Diarized speakers are numbered by FIRST APPEARANCE ("Speaker 1, 2, …"),
+/// not by raw cluster id: dropping dust clusters leaves sparse ids (spk_1,
+/// spk_3), and "Speaker 2 / Speaker 4" for two people reads as a bug. The
+/// fallback cluster becomes "Unknown"; "mic" is pre-registered as "You".
 fn collect_speakers(speakers: &mut Vec<Speaker>, segments: &[looma_core::TranscriptSegment]) {
+    let mut next = 1 + speakers
+        .iter()
+        .filter(|s| s.label.starts_with("Speaker "))
+        .count();
     for seg in segments {
         if speakers.iter().any(|s| s.key == seg.speaker_key) {
             continue;
         }
         let label = match seg.speaker_key.strip_prefix("spk_") {
             Some("unknown") => "Unknown".to_string(),
-            Some(n) => match n.parse::<u32>() {
-                Ok(i) => format!("Speaker {}", i + 1),
-                Err(_) => seg.speaker_key.clone(),
-            },
+            Some(_) => {
+                let l = format!("Speaker {next}");
+                next += 1;
+                l
+            }
             None => seg.speaker_key.clone(),
         };
         speakers.push(Speaker {
             key: seg.speaker_key.clone(),
             label,
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use looma_core::TranscriptSegment;
+
+    fn seg(key: &str) -> TranscriptSegment {
+        TranscriptSegment {
+            id: "x".into(),
+            speaker_key: key.into(),
+            start_ms: 0,
+            end_ms: 0,
+            text: String::new(),
+            words: vec![],
+        }
+    }
+
+    #[test]
+    fn speakers_are_numbered_contiguously_by_appearance() {
+        // Dust-dropping leaves sparse cluster ids (spk_1, spk_3); labelling by
+        // id would show "Speaker 2 / Speaker 4". Number by first appearance.
+        let mut speakers = vec![Speaker {
+            key: MIC_SPEAKER_KEY.into(),
+            label: "You".into(),
+        }];
+        let segs = [seg("spk_1"), seg("spk_1"), seg("spk_3"), seg("spk_unknown")];
+        collect_speakers(&mut speakers, &segs);
+        let label = |k: &str| speakers.iter().find(|s| s.key == k).unwrap().label.clone();
+        assert_eq!(label(MIC_SPEAKER_KEY), "You");
+        assert_eq!(label("spk_1"), "Speaker 1");
+        assert_eq!(label("spk_3"), "Speaker 2");
+        assert_eq!(label("spk_unknown"), "Unknown");
     }
 }
