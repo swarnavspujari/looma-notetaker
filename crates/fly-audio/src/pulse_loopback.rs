@@ -79,7 +79,7 @@ impl PulseRecorder {
         let t_written = written.clone();
         let t_stop = stop.clone();
         let worker = std::thread::Builder::new()
-            .name("looma-pulse-loopback".into())
+            .name("flyonthewall-pulse-loopback".into())
             .spawn(move || {
                 let mut buf = vec![0u8; FRAG_BYTES];
                 while !t_stop.load(Ordering::Relaxed) {

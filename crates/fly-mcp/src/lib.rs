@@ -1,4 +1,4 @@
-//! fly-mcp: a stdio MCP server over the Looma data dir. External MCP
+//! fly-mcp: a stdio MCP server over the Fly on the Wall data dir. External MCP
 //! clients (Claude Desktop, etc.) can search and read notes, folders,
 //! meetings, and transcripts — read-only, fully local.
 //!
@@ -7,7 +7,7 @@
 use fly_storage::Storage;
 use serde_json::{json, Value};
 
-pub const SERVER_NAME: &str = "looma";
+pub const SERVER_NAME: &str = "flyonthewall";
 pub const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_PROTOCOL_VERSION: &str = "2024-11-05";
 
@@ -59,7 +59,7 @@ impl Server {
             "protocolVersion": version,
             "capabilities": { "tools": {} },
             "serverInfo": { "name": SERVER_NAME, "version": SERVER_VERSION },
-            "instructions": "Looma's local meeting notes: search_notes finds notes and transcript passages; get_note / get_transcript / get_meeting read them; list_folders and list_recent browse."
+            "instructions": "Fly on the Wall's local meeting notes: search_notes finds notes and transcript passages; get_note / get_transcript / get_meeting read them; list_folders and list_recent browse."
         })
     }
 
@@ -223,7 +223,7 @@ fn tools_list() -> Value {
     json!({ "tools": [
         {
             "name": "search_notes",
-            "description": "Full-text search across Looma note bodies and meeting transcripts. Returns matching notes with snippets and note_ids.",
+            "description": "Full-text search across Fly on the Wall note bodies and meeting transcripts. Returns matching notes with snippets and note_ids.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "query": { "type": "string", "description": "Search terms" } },
@@ -323,7 +323,7 @@ mod tests {
             &server,
             json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}),
         );
-        assert_eq!(init["result"]["serverInfo"]["name"], "looma");
+        assert_eq!(init["result"]["serverInfo"]["name"], "flyonthewall");
         assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
 
         // notification → no response

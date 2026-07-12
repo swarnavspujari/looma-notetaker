@@ -127,5 +127,5 @@ pub fn run() {
             import_commands::import_media,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Looma");
+        .expect("error while running Fly on the Wall");
 }

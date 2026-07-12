@@ -1,4 +1,4 @@
-//! Domain types shared by every Looma crate.
+//! Domain types shared by every Fly on the Wall crate.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

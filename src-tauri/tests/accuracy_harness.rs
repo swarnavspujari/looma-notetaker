@@ -5,29 +5,29 @@
 //! recording on disk.
 //!
 //! Score an already-exported transcript JSON (no pipeline run):
-//!   LOOMA_HARNESS_SCORE_JSON=path\to\meeting.json \
+//!   FLYONTHEWALL_HARNESS_SCORE_JSON=path\to\meeting.json \
 //!     cargo test -p fly-app --test accuracy_harness -- --ignored --nocapture
 //!
 //! Run the pipeline over a recording folder (recording.mic.wav +
 //! recording.system.wav), optionally trimmed for fast iteration:
-//!   LOOMA_HARNESS_DIR=path\to\recording-folder \
-//!   LOOMA_HARNESS_MODEL=ggml-large-v3-turbo-q5_0 \
-//!   LOOMA_HARNESS_MAX_SECS=300 \
+//!   FLYONTHEWALL_HARNESS_DIR=path\to\recording-folder \
+//!   FLYONTHEWALL_HARNESS_MODEL=ggml-large-v3-turbo-q5_0 \
+//!   FLYONTHEWALL_HARNESS_MAX_SECS=300 \
 //!     cargo test -p fly-app --test accuracy_harness -- --ignored --nocapture
 //!
 //! Score against a human-grade reference transcript (Fathom .txt export) —
 //! adds per-channel WER, speaker-attributed WER, attribution error, and the
 //! cross-talk duplication rate to any of the modes above:
-//!   LOOMA_HARNESS_REFERENCE=path\to\fathom-export.txt \
-//!   LOOMA_HARNESS_REF_SELF=Swarnav          # substring of the ref speaker who is "You"
-//!   LOOMA_HARNESS_XTALK_MS=500              # dup window (default 500)
+//!   FLYONTHEWALL_HARNESS_REFERENCE=path\to\fathom-export.txt \
+//!   FLYONTHEWALL_HARNESS_REF_SELF=Swarnav          # substring of the ref speaker who is "You"
+//!   FLYONTHEWALL_HARNESS_XTALK_MS=500              # dup window (default 500)
 //!
 //! Cloud-reference mode (diagnostic only, no local pipeline): transcribe the
 //! mic and system channels with Groq to separate model quality from audio
 //! quality. The key comes from the environment ONLY — never a file/setting:
-//!   GROQ_API_KEY=... LOOMA_HARNESS_GROQ=1 LOOMA_HARNESS_DIR=... \
-//!   LOOMA_HARNESS_GROQ_MODEL=whisper-large-v3 \
-//!   LOOMA_HARNESS_GROQ_CACHE=path\to\cache-dir   # optional per-chunk response cache
+//!   GROQ_API_KEY=... FLYONTHEWALL_HARNESS_GROQ=1 FLYONTHEWALL_HARNESS_DIR=... \
+//!   FLYONTHEWALL_HARNESS_GROQ_MODEL=whisper-large-v3 \
+//!   FLYONTHEWALL_HARNESS_GROQ_CACHE=path\to\cache-dir   # optional per-chunk response cache
 //!     cargo test -p fly-app --test accuracy_harness -- --ignored --nocapture
 
 use std::path::Path;
@@ -424,12 +424,12 @@ fn match_map(ref_tokens: &[(String, usize)], hyp: &[HypWord]) -> Vec<Option<usiz
     map
 }
 
-/// Pick the reference speaker who is "You": LOOMA_HARNESS_REF_SELF substring
+/// Pick the reference speaker who is "You": FLYONTHEWALL_HARNESS_REF_SELF substring
 /// override, else the ref speaker whose words are best covered by the mic
 /// channel (best-effort — echo makes both sides match the mic, so prefer the
 /// explicit override on echo-suspect recordings).
 fn detect_self(reference: &Reference, mic: &[HypWord]) -> usize {
-    if let Ok(hint) = std::env::var("LOOMA_HARNESS_REF_SELF") {
+    if let Ok(hint) = std::env::var("FLYONTHEWALL_HARNESS_REF_SELF") {
         let hint = hint.to_ascii_lowercase();
         if let Some(idx) = reference
             .speakers
@@ -438,7 +438,7 @@ fn detect_self(reference: &Reference, mic: &[HypWord]) -> usize {
         {
             return idx;
         }
-        panic!("LOOMA_HARNESS_REF_SELF={hint:?} matches no reference speaker");
+        panic!("FLYONTHEWALL_HARNESS_REF_SELF={hint:?} matches no reference speaker");
     }
     let matched = match_map(&reference.tokens, mic);
     let mut best = (0usize, -1.0f64);
@@ -565,7 +565,7 @@ fn score_against_reference(t: &Transcript, ref_path: &str) {
     eprintln!("speaker-attributed WER (merged): {:5.1}%", sa_wer * 100.0);
 
     // ---- cross-talk duplication: ref words matched on BOTH channels ----
-    let window_ms: u64 = std::env::var("LOOMA_HARNESS_XTALK_MS")
+    let window_ms: u64 = std::env::var("FLYONTHEWALL_HARNESS_XTALK_MS")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(500);
@@ -623,7 +623,7 @@ fn score_against_reference(t: &Transcript, ref_path: &str) {
 }
 
 fn maybe_score_reference(t: &Transcript) {
-    if let Ok(ref_path) = std::env::var("LOOMA_HARNESS_REFERENCE") {
+    if let Ok(ref_path) = std::env::var("FLYONTHEWALL_HARNESS_REFERENCE") {
         score_against_reference(t, &ref_path);
     }
 }
@@ -738,11 +738,13 @@ async fn groq_transcribe_channel(
         .unwrap_or(samples.len());
     let samples = &samples[..take];
     let total_ms = samples.len() as u64 / 16; // 16 samples per ms at 16 kHz
-    let cache_dir = std::env::var("LOOMA_HARNESS_GROQ_CACHE").ok().map(|d| {
-        let d = std::path::PathBuf::from(d);
-        std::fs::create_dir_all(&d).expect("create groq cache dir");
-        d
-    });
+    let cache_dir = std::env::var("FLYONTHEWALL_HARNESS_GROQ_CACHE")
+        .ok()
+        .map(|d| {
+            let d = std::path::PathBuf::from(d);
+            std::fs::create_dir_all(&d).expect("create groq cache dir");
+            d
+        });
 
     let mut words: Vec<fly_core::Word> = Vec::new();
     let mut chunk_start = 0u64;
@@ -811,9 +813,9 @@ async fn groq_transcribe_channel(
 /// mode isolates ASR/audio quality; the system channel is one speaker key).
 fn groq_reference_transcript(rec_dir: &Path, max_secs: Option<u64>) -> Transcript {
     let api_key = std::env::var("GROQ_API_KEY")
-        .expect("LOOMA_HARNESS_GROQ is set but GROQ_API_KEY is not in the environment");
-    let model =
-        std::env::var("LOOMA_HARNESS_GROQ_MODEL").unwrap_or_else(|_| "whisper-large-v3".into());
+        .expect("FLYONTHEWALL_HARNESS_GROQ is set but GROQ_API_KEY is not in the environment");
+    let model = std::env::var("FLYONTHEWALL_HARNESS_GROQ_MODEL")
+        .unwrap_or_else(|_| "whisper-large-v3".into());
     let tmp = tempfile::tempdir().unwrap();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let (mic_words, sys_words) = runtime.block_on(async {
@@ -910,7 +912,7 @@ fn accuracy_harness() {
         .try_init();
 
     // ---- score-only mode: metrics for an exported transcript JSON ----
-    if let Ok(json_path) = std::env::var("LOOMA_HARNESS_SCORE_JSON") {
+    if let Ok(json_path) = std::env::var("FLYONTHEWALL_HARNESS_SCORE_JSON") {
         let raw = std::fs::read_to_string(&json_path).expect("read score json");
         let t: Transcript = serde_json::from_str(&raw).expect("parse transcript json");
         report(&t);
@@ -918,8 +920,8 @@ fn accuracy_harness() {
         return;
     }
 
-    let Ok(rec_dir) = std::env::var("LOOMA_HARNESS_DIR") else {
-        eprintln!("SKIP: set LOOMA_HARNESS_DIR or LOOMA_HARNESS_SCORE_JSON");
+    let Ok(rec_dir) = std::env::var("FLYONTHEWALL_HARNESS_DIR") else {
+        eprintln!("SKIP: set FLYONTHEWALL_HARNESS_DIR or FLYONTHEWALL_HARNESS_SCORE_JSON");
         return;
     };
     let rec_dir = std::path::PathBuf::from(rec_dir);
@@ -928,16 +930,16 @@ fn accuracy_harness() {
     assert!(mic_src.exists(), "missing {}", mic_src.display());
     assert!(sys_src.exists(), "missing {}", sys_src.display());
 
-    let model =
-        std::env::var("LOOMA_HARNESS_MODEL").unwrap_or_else(|_| "ggml-large-v3-turbo-q5_0".into());
-    let max_secs = std::env::var("LOOMA_HARNESS_MAX_SECS")
+    let model = std::env::var("FLYONTHEWALL_HARNESS_MODEL")
+        .unwrap_or_else(|_| "ggml-large-v3-turbo-q5_0".into());
+    let max_secs = std::env::var("FLYONTHEWALL_HARNESS_MAX_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok());
 
     // ---- Groq cloud-reference mode: no local pipeline, both channels ----
-    if std::env::var("LOOMA_HARNESS_GROQ").is_ok_and(|v| !v.is_empty() && v != "0") {
+    if std::env::var("FLYONTHEWALL_HARNESS_GROQ").is_ok_and(|v| !v.is_empty() && v != "0") {
         let t = groq_reference_transcript(&rec_dir, max_secs);
-        if let Ok(out) = std::env::var("LOOMA_HARNESS_OUT_JSON") {
+        if let Ok(out) = std::env::var("FLYONTHEWALL_HARNESS_OUT_JSON") {
             std::fs::write(&out, serde_json::to_string_pretty(&t).unwrap()).unwrap();
             eprintln!("transcript written to {out}");
         }
@@ -968,11 +970,11 @@ fn accuracy_harness() {
         link_tree(&real_data.join(sub), &data_dir.join(sub)).unwrap();
     }
     // GPU modes need the Vulkan build in place (no download inside the test)
-    if std::env::var("LOOMA_HARNESS_GPU").is_ok_and(|v| !v.is_empty() && v != "0") {
+    if std::env::var("FLYONTHEWALL_HARNESS_GPU").is_ok_and(|v| !v.is_empty() && v != "0") {
         let vulkan = real_data.join("bin/whisper-vulkan");
         assert!(
             vulkan.join("Release/whisper-cli.exe").exists(),
-            "LOOMA_HARNESS_GPU set but whisper-bin-vulkan is not installed"
+            "FLYONTHEWALL_HARNESS_GPU set but whisper-bin-vulkan is not installed"
         );
         link_tree(&vulkan, &data_dir.join("bin/whisper-vulkan")).unwrap();
     }
@@ -993,12 +995,12 @@ fn accuracy_harness() {
         let storage = state.storage.lock().unwrap();
         storage.set_setting("asr.tier", "light").unwrap();
         storage.set_setting("asr.model_id", &model).unwrap();
-        // Deterministic engine selection: CPU by default. LOOMA_HARNESS_GPU=1
+        // Deterministic engine selection: CPU by default. FLYONTHEWALL_HARNESS_GPU=1
         // forces the Vulkan build (verdict pre-seeded so no benchmark runs;
-        // pick the GPU with GGML_VK_VISIBLE_DEVICES). LOOMA_HARNESS_GPU=bench
+        // pick the GPU with GGML_VK_VISIBLE_DEVICES). FLYONTHEWALL_HARNESS_GPU=bench
         // enables GPU with NO verdict, exercising the real in-pipeline
         // benchmark + gate exactly as a user's machine would.
-        match std::env::var("LOOMA_HARNESS_GPU").ok().as_deref() {
+        match std::env::var("FLYONTHEWALL_HARNESS_GPU").ok().as_deref() {
             Some("bench") => {
                 storage.set_setting("asr.use_gpu", "true").unwrap();
             }
@@ -1063,7 +1065,7 @@ fn accuracy_harness() {
     eprintln!("pipeline took {:.1}s", started.elapsed().as_secs_f32());
 
     // keep the produced transcript for spot-checking against the audio
-    if let Ok(out) = std::env::var("LOOMA_HARNESS_OUT_JSON") {
+    if let Ok(out) = std::env::var("FLYONTHEWALL_HARNESS_OUT_JSON") {
         std::fs::write(&out, serde_json::to_string_pretty(&transcript).unwrap()).unwrap();
         eprintln!("transcript written to {out}");
     }

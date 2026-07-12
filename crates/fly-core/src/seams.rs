@@ -4,13 +4,13 @@
 //! domain model ad hoc. Do not implement anything here.
 
 /// Hosted share links / public note URLs would implement this. No
-/// implementation ships with Looma; notes never leave the machine.
+/// implementation ships with Fly on the Wall; notes never leave the machine.
 pub trait SharingProvider: Send + Sync {
     fn id(&self) -> &'static str;
 }
 
 /// Third-party app integrations (CRM, Notion, Slack, …) would implement
-/// this. No implementation ships with Looma.
+/// this. No implementation ships with Fly on the Wall.
 pub trait Integration: Send + Sync {
     fn id(&self) -> &'static str;
 }

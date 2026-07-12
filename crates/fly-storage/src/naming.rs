@@ -1,6 +1,6 @@
 //! Human-readable disk names. Meeting folders and note mirrors are named
 //! `<YYYY-MM-DD> <title>` (local date, so Explorer's name sort is
-//! chronological), sanitized to be legal on every filesystem Looma targets —
+//! chronological), sanitized to be legal on every filesystem Fly on the Wall targets —
 //! Windows rules are the strictest — and deduped with ` (2)`, ` (3)`… when
 //! two same-day artifacts share a title.
 

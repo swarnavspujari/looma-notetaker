@@ -1,6 +1,6 @@
 //! fly-secrets: the `SecretStore` trait plus the OS-keychain impl.
 //!
-//! Every API key and OAuth token in Looma goes through this crate. Nothing
+//! Every API key and OAuth token in Fly on the Wall goes through this crate. Nothing
 //! is ever written to disk in plaintext, and secret VALUES must never be
 //! logged (log key names only).
 

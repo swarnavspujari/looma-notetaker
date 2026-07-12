@@ -1,4 +1,4 @@
-//! fly-core: UI-agnostic, OS-agnostic domain model for Looma.
+//! fly-core: UI-agnostic, OS-agnostic domain model for Fly on the Wall.
 //!
 //! Notes, folders, meetings, transcripts, templates, provenance, and the
 //! word↔speaker aligner live here. Nothing in this crate may depend on an

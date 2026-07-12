@@ -46,7 +46,7 @@ fn stdio_server_answers_initialize_and_tool_calls() {
         json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}),
     );
     let init = recv();
-    assert_eq!(init["result"]["serverInfo"]["name"], "looma");
+    assert_eq!(init["result"]["serverInfo"]["name"], "flyonthewall");
 
     send(json!({"jsonrpc":"2.0","method":"notifications/initialized"}));
 

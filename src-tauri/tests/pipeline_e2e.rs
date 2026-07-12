@@ -91,18 +91,18 @@ fn golden_fixture_transcribes_and_diarizes() {
         return;
     }
 
-    // LOOMA_E2E_GPU=1 runs the golden fixture through the Vulkan GPU engine
+    // FLYONTHEWALL_E2E_GPU=1 runs the golden fixture through the Vulkan GPU engine
     // instead of CPU (needs the whisper-bin-vulkan artifact installed; pick
     // the GPU with GGML_VK_VISIBLE_DEVICES). A pre-seeded "gpu" verdict
     // skips the in-pipeline benchmark so the test exercises decode, not the
     // gate.
-    let gpu = std::env::var("LOOMA_E2E_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
+    let gpu = std::env::var("FLYONTHEWALL_E2E_GPU").is_ok_and(|v| !v.is_empty() && v != "0");
     if gpu
         && !real_data
             .join("bin/whisper-vulkan/Release/whisper-cli.exe")
             .exists()
     {
-        eprintln!("SKIP: LOOMA_E2E_GPU set but whisper-bin-vulkan is not installed");
+        eprintln!("SKIP: FLYONTHEWALL_E2E_GPU set but whisper-bin-vulkan is not installed");
         return;
     }
 
