@@ -1,119 +1,488 @@
-/* Bundled locally so the app stays fully offline (no font CDN). */
+/* ============================================================
+   Fly on the Wall — frontend token entry point
+   ------------------------------------------------------------
+   Ported verbatim from the Fly on the Wall design system
+   (design-system/project/tokens/*.css) — this file is the single
+   source of truth for color, type, space, elevation and motion.
+
+   Brand palette (fixed):
+     #0D0D12 ink · #7A5CFF violet · #FFD94A yellow
+     #F2F2E8 cream · #2B2B3C slate
+
+   Theme: tokens are explicit — `data-theme="light|dark"` on <html>.
+   The OS-follow default lives in JS (src/theme.ts), exactly as the
+   design's app-main.jsx does it. Every text/surface/status pairing
+   below is verified to WCAG 2.2 AA (4.5:1 body, 3:1 large/UI).
+
+   Fonts are self-hosted via @fontsource so the app stays offline.
+   ============================================================ */
+
+/* Fonts first (@import must precede rules). */
+@import "@fontsource/spline-sans/300.css";
 @import "@fontsource/spline-sans/400.css";
 @import "@fontsource/spline-sans/500.css";
 @import "@fontsource/spline-sans/600.css";
 @import "@fontsource/spline-sans/700.css";
+@import "@fontsource/spline-sans-mono/400.css";
+@import "@fontsource/spline-sans-mono/500.css";
+@import "@fontsource/spline-sans-mono/600.css";
 @import "@fontsource/bricolage-grotesque/400.css";
+@import "@fontsource/bricolage-grotesque/500.css";
 @import "@fontsource/bricolage-grotesque/600.css";
 @import "@fontsource/bricolage-grotesque/700.css";
+@import "@fontsource/bricolage-grotesque/800.css";
+
 @import "tailwindcss";
 
-/* Looma design system — warm cream/coral language from the Claude design export
-   (design/Looma.dc.html). Every surface color, type style and border in the app
-   should come from these tokens. */
+/* ============================================================
+   DESIGN TOKENS — the source of truth (tokens/*.css)
+   ============================================================ */
+:root {
+  /* ---- Reference: Violet (primary / "self" speaker) ---- */
+  --violet-50: #f2eeff;
+  --violet-100: #e5deff;
+  --violet-200: #cbbcff;
+  --violet-300: #a896ff; /* dark-theme primary */
+  --violet-400: #8e77ff;
+  --violet-500: #7a5cff; /* BRAND violet */
+  --violet-600: #6a4ae0; /* light-theme primary (fills w/ white text) */
+  --violet-700: #5b3fd9; /* violet-as-text on light */
+  --violet-800: #4a31b8;
+  --violet-900: #33236f;
+
+  /* ---- Reference: Yellow (secondary accent / highlight) ---- */
+  --yellow-100: #fff3c7;
+  --yellow-200: #ffe9a6;
+  --yellow-300: #ffe080;
+  --yellow-400: #ffd94a; /* BRAND yellow */
+  --yellow-500: #f5c518;
+  --yellow-600: #d9a800;
+  --yellow-700: #8a5300; /* amber, text-safe on light */
+
+  /* ---- Reference: Warm neutrals (light UI, "paper") ---- */
+  --warm-0: #ffffff;
+  --warm-50: #fbfaf4;
+  --warm-100: #f2f2e8; /* BRAND cream */
+  --warm-150: #eae9dc;
+  --warm-200: #e1e0d0;
+
+  /* ---- Reference: Cool neutrals (dark UI, "ink") ---- */
+  --cool-950: #0d0d12; /* BRAND black */
+  --cool-900: #121118;
+  --cool-850: #17161f;
+  --cool-800: #201f2a;
+  --cool-700: #2b2b3c; /* BRAND slate */
+  --cool-600: #3a3a4c;
+  --cool-500: #55556a;
+
+  /* ---- Reference: fixed brand hexes (logo / marketing) ---- */
+  --brand-ink: #0d0d12;
+  --brand-violet: #7a5cff;
+  --brand-yellow: #ffd94a;
+  --brand-cream: #f2f2e8;
+  --brand-slate: #2b2b3c;
+
+  /* ---- Reference: speaker rotation (mode-independent, white text) ---- */
+  --spk-self: #6a4ae0; /* your mic channel — always brand violet */
+  --spk-teal: #0c7d78;
+  --spk-blue: #2f62d9;
+  --spk-amber: #8f5a00;
+  --spk-pink: #be3c82;
+  --spk-green: #367a36;
+  --spk-indigo: #5a54b8;
+  --on-speaker: #ffffff;
+
+  /* ---------- SEMANTIC — LIGHT THEME (default) ---------- */
+  --bg: #f2f2e8; /* app canvas (cream) */
+  --surface: #ffffff; /* cards, editor, panels */
+  --surface-2: #fbfaf4; /* subtle raised / inset fills */
+  --surface-3: #f4f2e9; /* hover fill on canvas */
+  --shell: #eae9dc; /* window chrome: sidebar, bars, footer */
+  --overlay: rgba(13, 13, 18, 0.42); /* modal scrim */
+
+  --text: #16151c; /* primary */
+  --text-2: #4c4b57; /* secondary */
+  --text-3: #66646f; /* muted / tertiary */
+  --text-on-fill: #ffffff; /* on colored fills */
+
+  --primary: #6a4ae0;
+  --primary-hover: #5b3fd9;
+  --primary-press: #4a31b8;
+  --on-primary: #ffffff;
+  --primary-text: #5b3fd9; /* violet used AS text / links */
+  --primary-soft: #eeebfe; /* tinted chip fill */
+  --primary-soft-text: #5133c2;
+  --primary-border: rgba(122, 92, 255, 0.45);
+
+  --accent: #ffd94a; /* yellow — fills only, never text on light */
+  --accent-strong: #f5c518;
+  --on-accent: #1a1710;
+  --highlight: #ffe9a6; /* search / text marks */
+  --on-highlight: #16151c;
+
+  --line: rgba(20, 18, 28, 0.12);
+  --line-2: rgba(20, 18, 28, 0.06);
+  --line-strong: rgba(20, 18, 28, 0.26);
+
+  --rec: #d6342e; /* live recording (also error fill) */
+  --on-rec: #ffffff;
+  --error: #c42b26;
+  --error-text: #b0231f;
+  --error-soft: #fbe7e5;
+  --warning: #8a5300;
+  --warning-text: #8a5300;
+  --warning-soft: #fcefd6;
+  --success: #1f7a4d;
+  --success-text: #176b42;
+  --success-soft: #e2f3e9;
+  --info: #2f62d9;
+
+  color-scheme: light;
+
+  /* ---------- Typography scale (px to match the product) ---------- */
+  --fw-light: 300;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-black: 800;
+
+  --text-display-xl: 56px;   --leading-display-xl: 1.02;  --tracking-display-xl: -0.02em;
+  --text-display-lg: 40px;   --leading-display-lg: 1.05;  --tracking-display-lg: -0.02em;
+  --text-display-md: 30px;   --leading-display-md: 1.1;   --tracking-display-md: -0.015em;
+  --text-display-sm: 24px;   --leading-display-sm: 1.15;  --tracking-display-sm: -0.01em;
+  --text-title: 19px;        --leading-title: 1.2;        --tracking-title: -0.01em;
+
+  --text-body-lg: 16px;   --leading-body-lg: 1.6;
+  --text-body: 15px;      --leading-body: 1.6;
+  --text-body-sm: 14px;   --leading-body-sm: 1.55;
+  --text-ui: 13px;        --leading-ui: 1.4;
+  --text-ui-sm: 12px;     --leading-ui-sm: 1.4;
+  --text-micro: 11px;     --leading-micro: 1.3;
+  --text-label: 10.5px;   --tracking-label: 0.09em;
+  --text-mono: 12px;
+  --text-mono-sm: 11px;
+
+  /* ---------- Spacing (4px grid) ---------- */
+  --space-0: 0;
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 14px;
+  --space-8: 16px;
+  --space-10: 20px;
+  --space-12: 24px;
+  --space-14: 28px;
+  --space-16: 32px;
+  --space-20: 40px;
+  --space-24: 48px;
+  --space-32: 64px;
+
+  /* ---------- Radii ---------- */
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 14px;
+  --radius-2xl: 16px;
+  --radius-3xl: 18px;
+  --radius-pill: 999px;
+
+  /* ---------- Control heights ---------- */
+  --control-xs: 22px;
+  --control-sm: 30px;
+  --control-md: 36px;
+  --control-lg: 44px;
+
+  /* ---------- Layout — the desktop app shell ---------- */
+  --sidebar-w: 240px;
+  --notelist-w: 288px;
+  --askpanel-w: 320px;
+  --content-max: 760px;
+  --page-max: 1200px;
+
+  /* ---------- Elevation & focus (cool, ink-tinted) ---------- */
+  --shadow-xs: 0 1px 2px rgba(13, 13, 18, 0.06);
+  --shadow-sm: 0 1px 2px rgba(13, 13, 18, 0.06), 0 1px 1px rgba(13, 13, 18, 0.04);
+  --shadow-md: 0 4px 14px -4px rgba(13, 13, 18, 0.12), 0 2px 5px rgba(13, 13, 18, 0.06);
+  --shadow-lg: 0 18px 48px -16px rgba(13, 13, 18, 0.28), 0 3px 10px rgba(13, 13, 18, 0.08);
+  --shadow-pop: 0 10px 30px -10px rgba(13, 13, 18, 0.22), 0 2px 6px rgba(13, 13, 18, 0.08);
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--brand-violet) 55%, transparent);
+  --focus-ring-tight: 0 0 0 2px color-mix(in srgb, var(--brand-violet) 60%, transparent);
+
+  /* ---------- Motion ---------- */
+  --dur-instant: 80ms;
+  --dur-fast: 120ms;
+  --dur: 160ms;
+  --dur-slow: 240ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ============================================================
+   SEMANTIC — DARK THEME
+   ============================================================ */
+[data-theme="dark"] {
+  --bg: #0d0d12; /* app canvas (ink) */
+  --surface: #17161f; /* cards, editor, panels */
+  --surface-2: #201f2a; /* subtle raised / inset */
+  --surface-3: #2b2b3c; /* elevated (brand slate) */
+  --shell: #121118; /* window chrome */
+  --overlay: rgba(0, 0, 0, 0.62);
+
+  --text: #f2f2e8; /* primary (cream) */
+  --text-2: #c3c1ce; /* secondary */
+  --text-3: #a29fae; /* muted / tertiary */
+  --text-on-fill: #ffffff;
+
+  --primary: #a896ff;
+  --primary-hover: #b7a8ff;
+  --primary-press: #8e77ff;
+  --on-primary: #0d0d12;
+  --primary-text: #b7a8ff;
+  --primary-soft: #201b33;
+  --primary-soft-text: #c3b4ff;
+  --primary-border: rgba(122, 92, 255, 0.55);
+
+  --accent: #ffd94a;
+  --accent-strong: #ffe080;
+  --on-accent: #1a1710;
+  --highlight: rgba(255, 217, 74, 0.22);
+  --on-highlight: #f2f2e8;
+
+  --line: rgba(242, 242, 232, 0.14);
+  --line-2: rgba(242, 242, 232, 0.07);
+  --line-strong: rgba(242, 242, 232, 0.3);
+
+  --rec: #d6342e;
+  --on-rec: #ffffff;
+  --error: #ff6b66;
+  --error-text: #ff8a85;
+  --error-soft: #2e1615;
+  --warning: #f0b429;
+  --warning-text: #f0b429;
+  --warning-soft: #2c2410;
+  --success: #4bd08a;
+  --success-text: #6fdba3;
+  --success-soft: #12241a;
+  --info: #6e9bff;
+
+  color-scheme: dark;
+
+  /* Elevation — deeper, near-black shadows in dark. */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45), 0 1px 1px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px -4px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 22px 55px -18px rgba(0, 0, 0, 0.7), 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 12px 34px -10px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+/* ============================================================
+   TAILWIND THEME MAPPING — utilities consume the tokens above.
+   `bg-surface`, `text-text-2`, `border-line`, `bg-primary`, … all
+   resolve to var(--…) and therefore switch with data-theme.
+   ============================================================ */
 @theme {
+  /* Fonts (also emitted as --font-* for the ported component CSS). */
   --font-sans: "Spline Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-display: "Bricolage Grotesque", "Spline Sans", system-ui, sans-serif;
+  --font-mono: "Spline Sans Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
-  --color-cream: #faf6f1; /* app background */
-  --color-surface: #ffffff; /* cards, editor, panels */
-  --color-shell: #f2eae0; /* window chrome: sidebar, bars */
-  --color-peach: #fbeadf; /* selected / hover fills, AI tint */
-  --color-peach-2: #fdf3ec; /* subtle fills */
-  --color-coral: #e86a4a; /* accent */
-  --color-clay: #a64a2e; /* accent text on peach */
-  --color-ink: #2a2320; /* primary text */
-  --color-ink-2: #5c524b; /* secondary text */
-  --color-mute: #94897f; /* tertiary text */
-  --color-line: rgba(60, 40, 30, 0.1); /* borders */
-  --color-line-2: rgba(60, 40, 30, 0.05); /* hairlines */
-  --color-rec: #e23b3b; /* live recording */
+  /* ---- Semantic color roles (the vocabulary screens should adopt) ---- */
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-shell: var(--shell);
 
-  /* speaker rotation (mic/self is always coral) */
-  --color-spk-teal: #2fa39a;
-  --color-spk-violet: #7a6ce0;
-  --color-spk-blue: #3e7be0;
-  --color-spk-amber: #e0912f;
-  --color-spk-pink: #d4589e;
-  --color-spk-green: #5b8a3c;
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-on-fill: var(--text-on-fill);
 
-  --shadow-warm: 0 24px 60px -18px rgba(70, 34, 16, 0.35), 0 2px 8px rgba(0, 0, 0, 0.06);
-  --shadow-card: 0 1px 2px rgba(60, 40, 30, 0.05);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-press: var(--primary-press);
+  --color-on-primary: var(--on-primary);
+  --color-primary-text: var(--primary-text);
+  --color-primary-soft: var(--primary-soft);
+  --color-primary-soft-text: var(--primary-soft-text);
+
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-on-accent: var(--on-accent);
+  --color-highlight: var(--highlight);
+  --color-on-highlight: var(--on-highlight);
+
+  --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-line-strong: var(--line-strong);
+
+  --color-rec: var(--rec);
+  --color-on-rec: var(--on-rec);
+  --color-error: var(--error);
+  --color-error-text: var(--error-text);
+  --color-error-soft: var(--error-soft);
+  --color-warning: var(--warning);
+  --color-warning-text: var(--warning-text);
+  --color-warning-soft: var(--warning-soft);
+  --color-success: var(--success);
+  --color-success-text: var(--success-text);
+  --color-success-soft: var(--success-soft);
+  --color-info: var(--info);
+
+  --color-spk-self: var(--spk-self);
+  --color-spk-teal: var(--spk-teal);
+  --color-spk-blue: var(--spk-blue);
+  --color-spk-amber: var(--spk-amber);
+  --color-spk-pink: var(--spk-pink);
+  --color-spk-green: var(--spk-green);
+  --color-spk-indigo: var(--spk-indigo);
+  --color-on-speaker: var(--on-speaker);
+
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-violet: var(--brand-violet);
+  --color-brand-yellow: var(--brand-yellow);
+  --color-brand-cream: var(--brand-cream);
+  --color-brand-slate: var(--brand-slate);
+
+  /* ------------------------------------------------------------
+     LEGACY ALIASES — TEMPORARY.
+     The old cream/coral class names still used by not-yet-restyled
+     screens (bg-coral, text-ink, bg-peach, text-clay, …) now resolve
+     to the new theme-aware tokens, so those screens stay coherent and
+     dark-mode-aware without edits. Remove this block once every screen
+     has migrated to the semantic roles above (next session).
+     ------------------------------------------------------------ */
+  --color-cream: var(--bg);
+  --color-peach: var(--primary-soft); /* selection / hover / AI tint */
+  --color-peach-2: var(--surface-3); /* subtle hover on canvas */
+  --color-coral: var(--primary); /* old accent → violet */
+  --color-clay: var(--primary-soft-text); /* old accent text → violet */
+  --color-ink: var(--text); /* old primary text → theme text */
+  --color-ink-2: var(--text-2);
+  --color-mute: var(--text-3);
+  --color-spk-violet: var(--spk-indigo); /* old rotation slot */
+
+  /* Legacy elevation names. */
+  --shadow-warm: var(--shadow-lg);
+  --shadow-card: var(--shadow-sm);
 }
 
-:root {
-  font-family: var(--font-sans);
+/* ============================================================
+   BASE ELEMENT DEFAULTS
+   ============================================================ */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--leading-body);
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--brand-violet) 24%, transparent);
+    color: var(--text);
+  }
+
+  /* Keyboard focus visibility for interactive elements. */
+  :where(button, [role="button"], input, select, textarea, a, [tabindex]):focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  /* Scrollbars — subtle, theme-aware. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: var(--radius-pill);
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--text-3) 60%, transparent);
+    background-clip: content-box;
+    border: 2px solid transparent;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
 
-html,
-body,
-#root {
-  height: 100%;
+/* ============================================================
+   MOTION KEYFRAMES
+   `fly-*` are the design-system names used by the primitives.
+   The unprefixed aliases below are kept for screens still
+   referencing the old names (pulse-dot / wave / fade-up / shimmer);
+   remove them once those screens migrate.
+   ============================================================ */
+@keyframes fly-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+@keyframes fly-wave {
+  0%, 100% { transform: scaleY(0.32); }
+  50% { transform: scaleY(1); }
+}
+@keyframes fly-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fly-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes fly-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-body {
-  margin: 0;
-  background: var(--color-cream);
-  color: var(--color-ink);
-  -webkit-font-smoothing: antialiased;
-}
-
-::selection {
-  background: #f8d8c6;
-}
-
-::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(60, 40, 30, 0.16);
-  border-radius: 9px;
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(60, 40, 30, 0.28);
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-
+/* Legacy aliases (un-migrated screens). */
 @keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.3;
-  }
-}
-@keyframes fade-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-@keyframes shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 @keyframes wave {
-  0%,
-  100% {
-    transform: scaleY(0.32);
-  }
-  50% {
-    transform: scaleY(1);
+  0%, 100% { transform: scaleY(0.32); }
+  50% { transform: scaleY(1); }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

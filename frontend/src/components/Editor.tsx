@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import type {
+  Attachment,
   CaptureTarget,
   Folder,
   Meeting,
@@ -10,9 +12,27 @@ import type {
   Template,
   Transcript,
 } from "../types";
+import {
+  AudioWaveform,
+  Calendar,
+  ChevronDown,
+  FileDown,
+  Folder as FolderIcon,
+  LayoutTemplate,
+  List,
+  MessageSquare,
+  Mic,
+  Monitor,
+  Paperclip,
+  Play,
+  Printer,
+  Sparkles,
+  Square,
+  X,
+} from "lucide-react";
 import { api } from "../api";
 import { fmtElapsed } from "./RecordingBar";
-import { Btn } from "./ui";
+import { Avatar, Button, SectionLabel } from "./ui";
 import TranscriptPanel from "./TranscriptPanel";
 import LivePane from "./LivePane";
 import EnhancedDoc from "./EnhancedDoc";
@@ -39,10 +59,477 @@ interface Props {
   onRelabel: (speakerKey: string, label: string) => void;
 }
 
-const URL_RE = /^https?:\/\/\S+$/;
+type View = "notes" | "transcript" | "enhanced";
 
-const SELECT_CLS =
-  "cursor-pointer rounded-lg border border-line bg-surface px-2 py-1 text-xs text-ink-2 outline-none focus:border-coral";
+const URL_RE = /^https?:\/\/\S+$/;
+const VIDEO_RE = /\.(mp4|webm|mov|mkv|m4v)$/i;
+const isVideo = (a: Attachment) => (a.mime?.startsWith("video/") ?? false) || VIDEO_RE.test(a.file_name);
+
+const CHIP =
+  "inline-flex items-center gap-1.5 rounded-full border border-line bg-surface-2 px-2.5 py-1 text-[12.5px] font-medium text-text-2";
+const FOLDER_SELECT_CLS =
+  "max-w-[8.5rem] cursor-pointer rounded-md border border-line bg-surface px-2 py-1 text-xs text-text-2 outline-none hover:border-line-strong focus:border-primary";
+
+function fmtWhen(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${date} · ${time}`;
+}
+
+/* ---- Audio waveform player: round violet play button opens the recording in
+   the system player (matches the build's existing playback). The bars are a
+   decorative waveform; timecodes are mono. ---- */
+function AudioPlayer({ durationMs, onPlay }: { durationMs: number; onPlay: () => void }) {
+  return (
+    <div
+      className="mb-4 flex items-center gap-3 rounded-xl border border-line px-3.5 py-2.5"
+      style={{ background: "var(--surface-2)" }}
+    >
+      <Button
+        variant="primary"
+        size="sm"
+        onClick={onPlay}
+        title="Play recording (opens in your system player)"
+        aria-label="Play recording"
+        className="!h-[38px] !w-[38px] !rounded-full !p-0"
+      >
+        <Play size={16} strokeWidth={2} style={{ marginLeft: 2 }} />
+      </Button>
+      <span className="w-10 flex-none font-mono text-[12px]" style={{ color: "var(--text-2)" }}>
+        0:00
+      </span>
+      <div className="flex flex-1 items-center gap-[2px]" style={{ height: 30 }} aria-hidden="true">
+        {Array.from({ length: 56 }).map((_, i) => {
+          const h = 5 + (Math.sin(i * 1.7) * 0.5 + 0.5) * 17;
+          return (
+            <span
+              key={i}
+              className="flex-1 rounded-[2px]"
+              style={{ height: h, background: "var(--line-strong)", opacity: 0.45 }}
+            />
+          );
+        })}
+      </div>
+      <span className="w-12 flex-none text-right font-mono text-[12px]" style={{ color: "var(--text-3)" }}>
+        {fmtElapsed(durationMs)}
+      </span>
+    </div>
+  );
+}
+
+function VideoTile({
+  att,
+  big,
+  onOpen,
+}: {
+  att: Attachment;
+  big?: boolean;
+  onOpen: (relPath: string) => void;
+}) {
+  return (
+    <div className="flex-none overflow-hidden rounded-xl border border-line" style={{ width: big ? "100%" : 200 }}>
+      <button
+        onClick={() => onOpen(att.rel_path)}
+        title={`Play ${att.file_name}`}
+        aria-label={`Play ${att.file_name}`}
+        className="relative block w-full cursor-pointer border-0 p-0"
+        style={{
+          paddingTop: "56%",
+          background: "repeating-linear-gradient(135deg, rgba(128,124,140,.10) 0 8px, rgba(128,124,140,.2) 8px 16px)",
+        }}
+      >
+        <span className="absolute inset-0 grid place-items-center">
+          <span
+            className="grid place-items-center rounded-full"
+            style={{
+              width: big ? 52 : 40,
+              height: big ? 52 : 40,
+              background: "rgba(255,255,255,.92)",
+              color: "#0D0D12",
+              boxShadow: "var(--shadow-md)",
+            }}
+          >
+            <Play size={big ? 20 : 15} strokeWidth={2} style={{ marginLeft: 3 }} />
+          </span>
+        </span>
+      </button>
+      <div
+        className="overflow-hidden text-ellipsis whitespace-nowrap px-2.5 py-1.5 text-[12px] font-semibold"
+        style={{ color: "var(--text)", background: "var(--surface-2)" }}
+      >
+        {att.file_name}
+      </div>
+    </div>
+  );
+}
+
+function VideoStrip({ videos, onOpen }: { videos: Attachment[]; onOpen: (relPath: string) => void }) {
+  const [open, setOpen] = useState(false);
+  if (videos.length === 0) return null;
+  if (videos.length === 1) {
+    return (
+      <div className="mb-3.5">
+        <VideoTile att={videos[0]} big onOpen={onOpen} />
+      </div>
+    );
+  }
+  return (
+    <div className="mb-3.5">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-line px-3 py-1.5 text-[12.5px] font-semibold"
+        style={{ background: "var(--surface-2)", color: "var(--text)" }}
+      >
+        <Monitor size={14} strokeWidth={1.75} style={{ color: "var(--text-3)" }} />
+        {videos.length} screen recordings
+        <ChevronDown
+          size={14}
+          strokeWidth={1.75}
+          style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .15s" }}
+        />
+      </button>
+      {open && (
+        <div className="mt-2.5 flex flex-wrap gap-2.5">
+          {videos.map((v) => (
+            <VideoTile key={v.id} att={v} onOpen={onOpen} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---- Screen-record control: outline Button + capture popover, or the live
+   recording chip while capturing. Wired to the existing screen handlers. ---- */
+function ScreenControl({
+  screenStatus,
+  onStartScreen,
+  onStopScreen,
+}: {
+  screenStatus: ScreenStatus;
+  onStartScreen: (target: CaptureTarget) => void;
+  onStopScreen: () => void;
+}) {
+  const [menu, setMenu] = useState(false);
+
+  if (screenStatus.active) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5"
+        style={{ borderColor: "var(--rec)", background: "color-mix(in srgb, var(--rec) 12%, transparent)" }}
+      >
+        <span
+          className="h-2 w-2 rounded-full"
+          style={{ background: "var(--rec)", animation: "fly-pulse-dot 1.2s ease infinite" }}
+        />
+        <span className="whitespace-nowrap text-xs font-semibold" style={{ color: "var(--rec)" }}>
+          Screen · {fmtElapsed(screenStatus.elapsed_ms)}
+        </span>
+        <button
+          onClick={onStopScreen}
+          title="Stop screen recording"
+          className="flex cursor-pointer border-0 bg-transparent p-0"
+          style={{ color: "var(--rec)" }}
+        >
+          <Square size={11} strokeWidth={2} />
+        </button>
+      </span>
+    );
+  }
+
+  const pick = (choice: "full" | "window" | "region") => {
+    setMenu(false);
+    if (choice === "full") {
+      onStartScreen({ kind: "full_screen" });
+    } else if (choice === "window") {
+      const t = prompt("Exact window title to capture:");
+      if (t) onStartScreen({ kind: "window", title: t });
+    } else {
+      const spec = prompt("Region as x,y,width,height:", "0,0,1280,720");
+      const parts = spec?.split(",").map((n) => parseInt(n.trim(), 10)) ?? [];
+      if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
+        onStartScreen({ kind: "region", x: parts[0], y: parts[1], width: parts[2], height: parts[3] });
+      }
+    }
+  };
+
+  return (
+    <span className="relative inline-flex">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => setMenu((m) => !m)}
+        startIcon={<Monitor size={14} strokeWidth={1.75} />}
+        title="Record the screen (attached to this note)"
+      >
+        Record screen
+      </Button>
+      {menu && (
+        <>
+          <span className="fixed inset-0 z-10" onClick={() => setMenu(false)} aria-hidden="true" />
+          <span
+            className="absolute right-0 z-20 min-w-[154px] p-1"
+            style={{
+              top: "calc(100% + 6px)",
+              background: "var(--surface)",
+              border: "1px solid var(--line)",
+              borderRadius: "var(--radius-lg)",
+              boxShadow: "var(--shadow-pop)",
+            }}
+          >
+            <SectionLabel className="block px-2.5 pb-1 pt-1.5">Capture</SectionLabel>
+            {(
+              [
+                ["full", "Full screen"],
+                ["window", "Window…"],
+                ["region", "Region…"],
+              ] as const
+            ).map(([v, l]) => (
+              <button
+                key={v}
+                onClick={() => pick(v)}
+                className="block w-full cursor-pointer border-0 bg-transparent px-2.5 py-1.5 text-left text-[13px] text-text hover:bg-surface-3"
+                style={{ borderRadius: "var(--radius-sm)" }}
+              >
+                {l}
+              </button>
+            ))}
+          </span>
+        </>
+      )}
+    </span>
+  );
+}
+
+/* ---- Title context row: passive context chips + a real "Show in folder"
+   action Button set off by a divider. ---- */
+function MetaRow({
+  note,
+  meeting,
+  templates,
+  templateId,
+  setTemplateId,
+  onShowInFolder,
+  onOpenAttachment,
+  onRemoveAttachment,
+}: {
+  note: Note;
+  meeting: Meeting | null;
+  templates: Template[];
+  templateId: string;
+  setTemplateId: (id: string) => void;
+  onShowInFolder: () => void;
+  onOpenAttachment: (relPath: string) => void;
+  onRemoveAttachment: (attachmentId: string) => void;
+}) {
+  const [opening, setOpening] = useState(false);
+  const tplName = templates.find((t) => t.id === templateId)?.name ?? templates[0]?.name ?? "Template";
+  const rec = meeting?.recording ?? null;
+  const mins = rec ? Math.max(1, Math.round(rec.duration_ms / 60000)) : 0;
+  const fileAtts = note.attachments.filter((a) => !isVideo(a));
+  const when = fmtWhen(meeting?.started_at ?? note.created_at);
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {when && (
+        <span className={CHIP}>
+          <Calendar size={13} strokeWidth={1.75} style={{ color: "var(--text-3)" }} /> {when}
+        </span>
+      )}
+
+      {/* template chip — a styled native select */}
+      <span className={`${CHIP} relative cursor-pointer !p-0 hover:bg-surface-3`} title="Note template">
+        <span className="pointer-events-none inline-flex items-center gap-1.5 py-1 pl-2.5 pr-7">
+          <LayoutTemplate size={13} strokeWidth={1.75} style={{ color: "var(--text-3)" }} /> {tplName}
+        </span>
+        <ChevronDown
+          size={12}
+          strokeWidth={1.75}
+          className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2"
+          style={{ color: "var(--text-3)" }}
+        />
+        <select
+          value={templateId}
+          onChange={(e) => setTemplateId(e.target.value)}
+          aria-label="Note template"
+          className="absolute inset-0 h-full w-full cursor-pointer border-0 opacity-0"
+        >
+          {templates.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      </span>
+
+      {meeting && meeting.attendees.length > 0 && (
+        <span className={CHIP}>
+          <span className="flex">
+            {meeting.attendees.slice(0, 4).map((a, i) => (
+              <Avatar
+                key={i}
+                name={a}
+                index={i}
+                shape="circle"
+                size="xs"
+                style={{ marginLeft: i ? -6 : 0, boxShadow: "0 0 0 2px var(--surface-2)" }}
+              />
+            ))}
+          </span>
+          {meeting.attendees[0]}
+          {meeting.attendees.length > 1 ? ` +${meeting.attendees.length - 1}` : ""}
+        </span>
+      )}
+
+      {rec && (
+        <span className={CHIP}>
+          <Mic size={13} strokeWidth={1.75} style={{ color: "var(--rec)" }} /> Recorded · {mins} min
+        </span>
+      )}
+
+      {fileAtts.map((a) => (
+        <span key={a.id} className={`${CHIP} group cursor-pointer border-dashed hover:bg-surface-3`}>
+          <button
+            className="inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent p-0 text-inherit"
+            title="Open"
+            onClick={() => onOpenAttachment(a.rel_path)}
+          >
+            <Paperclip size={13} strokeWidth={1.75} style={{ color: "var(--text-3)" }} /> {a.file_name}
+          </button>
+          <button
+            title="Remove attachment"
+            onClick={() => onRemoveAttachment(a.id)}
+            className="ml-0.5 hidden cursor-pointer rounded p-0.5 text-text-3 hover:text-rec group-hover:inline-flex"
+          >
+            <X size={11} strokeWidth={2} />
+          </button>
+        </span>
+      ))}
+
+      {/* Secondary action — a real Button (not a chip): reveals this note's local folder */}
+      <span className="mx-1 h-[18px] w-px flex-none" style={{ background: "var(--line)" }} aria-hidden="true" />
+      <Button
+        variant="outline"
+        size="sm"
+        title="Show in folder — open this note's folder on this machine (audio, transcript & files stay local)"
+        onClick={() => {
+          setOpening(true);
+          onShowInFolder();
+          window.setTimeout(() => setOpening(false), 1300);
+        }}
+        startIcon={<FolderIcon size={14} strokeWidth={1.75} style={{ color: "var(--primary-text)" }} />}
+      >
+        {opening ? "Opening…" : "Show in folder"}
+      </Button>
+    </div>
+  );
+}
+
+/* ---- Floating Granola-style view switcher ---- */
+function SwitchSeg({
+  active,
+  onClick,
+  icon,
+  label,
+  busy,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+  label: string;
+  busy?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      className={`inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full border-0 px-[15px] py-2 text-[12.5px] font-semibold transition-colors ${
+        active ? "bg-primary text-on-primary" : "bg-transparent text-text-2 hover:bg-surface-3"
+      }`}
+    >
+      {icon}
+      {label}
+      {busy && (
+        <span
+          className="ml-0.5 h-1.5 w-1.5 rounded-full bg-current"
+          style={{ animation: "fly-pulse-dot 1.2s ease infinite" }}
+        />
+      )}
+    </button>
+  );
+}
+
+function ViewSwitcher({
+  view,
+  setView,
+  hasMeeting,
+  enhanced,
+  transcriptBusy,
+  onEnhance,
+  enhancing,
+}: {
+  view: View;
+  setView: (v: View) => void;
+  hasMeeting: boolean;
+  enhanced: boolean;
+  transcriptBusy: boolean;
+  onEnhance: () => void;
+  enhancing: boolean;
+}) {
+  return (
+    <div className="print:hidden absolute bottom-5 left-1/2 z-[8] flex -translate-x-1/2 items-center gap-2.5">
+      <div
+        className="flex items-center gap-[3px] rounded-full border border-line bg-surface p-1"
+        style={{ boxShadow: "var(--shadow-lg)" }}
+      >
+        {hasMeeting && (
+          <SwitchSeg
+            active={view === "transcript"}
+            onClick={() => setView("transcript")}
+            icon={<AudioWaveform size={16} strokeWidth={1.75} />}
+            label="Transcript"
+            busy={transcriptBusy}
+          />
+        )}
+        <SwitchSeg
+          active={view === "notes"}
+          onClick={() => setView("notes")}
+          icon={<List size={16} strokeWidth={1.75} />}
+          label="Notes"
+        />
+        {enhanced && (
+          <SwitchSeg
+            active={view === "enhanced"}
+            onClick={() => setView("enhanced")}
+            icon={<Sparkles size={16} strokeWidth={1.75} />}
+            label="Enhanced"
+          />
+        )}
+      </div>
+      {view === "notes" && (
+        <button
+          onClick={onEnhance}
+          disabled={enhancing}
+          title={enhanced ? "Re-enhance with AI" : "Enhance with AI"}
+          className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-4 py-2.5 text-[12.5px] font-semibold"
+          style={{
+            background: "var(--primary-soft)",
+            color: "var(--primary-soft-text)",
+            borderColor: "var(--primary-border)",
+            boxShadow: "var(--shadow-lg)",
+            cursor: enhancing ? "default" : "pointer",
+            opacity: enhancing ? 0.7 : 1,
+          }}
+        >
+          <Sparkles size={16} strokeWidth={1.75} />
+          {enhancing ? "Enhancing…" : enhanced ? "Re-enhance" : "Enhance"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 export default function Editor({
   note,
@@ -67,7 +554,7 @@ export default function Editor({
   const [title, setTitle] = useState(note.title);
   const [scratchpad, setScratchpad] = useState(note.scratchpad);
   const [saveState, setSaveState] = useState<"saved" | "saving">("saved");
-  const [view, setView] = useState<"scratch" | "enhanced">("scratch");
+  const [view, setView] = useState<View>(() => (note.blocks.length > 0 ? "enhanced" : "notes"));
   const [templateId, setTemplateId] = useState("tpl-general");
   const [enhancing, setEnhancing] = useState(false);
   const [enhanceError, setEnhanceError] = useState<string | null>(null);
@@ -76,6 +563,10 @@ export default function Editor({
   const saveTimer = useRef<number | null>(null);
   const noteIdRef = useRef(note.id);
 
+  const enhanced = note.blocks.length > 0;
+  const isRecordingThisNote = recStatus.active && recStatus.note_id === note.id;
+  const hasMeeting = meeting != null || (isRecordingThisNote && recStatus.meeting_id != null);
+
   // Swap editor contents when a different note is opened.
   useEffect(() => {
     if (noteIdRef.current !== note.id) {
@@ -83,12 +574,18 @@ export default function Editor({
       setTitle(note.title);
       setScratchpad(note.scratchpad);
       setSaveState("saved");
-      setView(note.blocks.length > 0 ? "enhanced" : "scratch");
+      setView(note.blocks.length > 0 ? "enhanced" : "notes");
       setEnhanceError(null);
       setAskOpen(false);
       setZoomIds([]);
     }
   }, [note]);
+
+  // Keep the active view valid for this note.
+  useEffect(() => {
+    if (view === "transcript" && !hasMeeting) setView("notes");
+    if (view === "enhanced" && !enhanced) setView("notes");
+  }, [note.id, hasMeeting, enhanced, view]);
 
   // External scratchpad changes (e.g. "insert into note" from Ask).
   useEffect(() => {
@@ -171,270 +668,184 @@ export default function Editor({
 
   const zoom = (segmentIds: string[]) => {
     setZoomIds(segmentIds);
+    if (hasMeeting) setView("transcript");
   };
+
+  const rec = meeting?.recording ?? null;
+  const audioPath = rec?.mixed_path || rec?.mic_path || rec?.system_path || null;
+  const videos = note.attachments.filter(isVideo);
+  const playAudio = () => {
+    if (audioPath) void api.openAttachment(audioPath);
+  };
+  const openAttachmentRel = (relPath: string) => void api.openAttachment(relPath);
+  const showInFolder = () => {
+    const p = rec?.mixed_path || rec?.mic_path || note.attachments[0]?.rel_path || null;
+    if (p) void api.revealAttachment(p);
+    else void api.revealDataDir();
+  };
+
+  const showTranscript = view === "transcript" && hasMeeting;
+  const showEnhanced = view === "enhanced" && enhanced;
+  const showNotes = !showTranscript && !showEnhanced;
 
   return (
     <div className="flex h-full min-w-0 flex-1">
-      <div className="flex min-w-0 flex-1 flex-col bg-surface">
-        <div className="border-b border-line px-6 pb-3 pt-2.5">
-          <div className="print:hidden mb-1.5 flex flex-wrap items-center justify-end gap-2">
-            {!recStatus.active && (
-              <Btn
-                variant="record"
-                size="sm"
-                onClick={onStartRecording}
-                title="Record this meeting (mic + system audio)"
-              >
-                <span className="h-2 w-2 rounded-full bg-white" /> Record
-              </Btn>
-            )}
-            {screenStatus.active ? (
-              <Btn
-                variant="dark"
-                size="sm"
-                onClick={onStopScreen}
-                title="Stop the screen recording"
-              >
-                <span className="h-2 w-2 rounded-[3px] bg-white" />
-                <span className="font-mono text-[11px]">{fmtElapsed(screenStatus.elapsed_ms)}</span>
-                Stop
-              </Btn>
-            ) : (
-              <select
-                value=""
-                onChange={(e) => {
-                  const choice = e.target.value;
-                  e.target.value = "";
-                  if (choice === "full") {
-                    onStartScreen({ kind: "full_screen" });
-                  } else if (choice === "window") {
-                    const title = prompt("Exact window title to capture:");
-                    if (title) onStartScreen({ kind: "window", title });
-                  } else if (choice === "region") {
-                    const spec = prompt("Region as x,y,width,height:", "0,0,1280,720");
-                    const parts = spec?.split(",").map((n) => parseInt(n.trim(), 10)) ?? [];
-                    if (parts.length === 4 && parts.every((n) => Number.isFinite(n))) {
-                      onStartScreen({
-                        kind: "region",
-                        x: parts[0],
-                        y: parts[1],
-                        width: parts[2],
-                        height: parts[3],
-                      });
-                    }
-                  }
-                }}
-                title="Record the screen (attached to this note)"
-                className={SELECT_CLS}
-              >
-                <option value="">Screen…</option>
-                <option value="full">Full screen</option>
-                <option value="window">Window…</option>
-                <option value="region">Region…</option>
-              </select>
-            )}
-            <select
-              value={templateId}
-              onChange={(e) => setTemplateId(e.target.value)}
-              className={`max-w-36 ${SELECT_CLS}`}
-              title="Template for Enhance"
-            >
-              {templates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-            <Btn
-              variant="soft"
+      <div className="relative flex min-w-0 flex-1 flex-col bg-surface">
+        {/* controls bar */}
+        <div className="print:hidden flex flex-wrap items-center justify-end gap-2 border-b border-line px-6 py-2.5">
+          {!recStatus.active && (
+            <Button
+              variant="record"
               size="sm"
-              onClick={() => void enhance()}
-              disabled={enhancing}
-              title="Merge your notes with the transcript into structured notes"
+              onClick={onStartRecording}
+              title="Record this meeting (mic + system audio)"
+              startIcon={<span className="h-2 w-2 rounded-full bg-white" />}
             >
-              <span className="h-[7px] w-[7px] rounded-full bg-coral" />
-              {enhancing ? "Enhancing…" : note.blocks.length > 0 ? "Re-enhance" : "Enhance"}
-            </Btn>
-            <Btn
-              variant={askOpen ? "soft" : "outline"}
-              size="sm"
-              onClick={() => setAskOpen((o) => !o)}
-              title="Ask questions about this meeting"
-            >
-              Ask
-            </Btn>
-            <select
-              value={note.folder_id ?? ""}
-              onChange={(e) => onMoveNote(e.target.value === "" ? null : e.target.value)}
-              className={`max-w-28 ${SELECT_CLS}`}
-              title="Move to folder"
-            >
-              <option value="">Unfiled</option>
-              {folders.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.name}
-                </option>
-              ))}
-            </select>
-            <span className="w-12 shrink-0 text-right text-xs text-mute">
-              {saveState === "saving" ? "saving…" : "saved"}
-            </span>
-          </div>
-          <input
-            value={title}
-            onChange={(e) => {
-              setTitle(e.target.value);
-              scheduleSave(e.target.value, scratchpad);
-            }}
-            className="w-full bg-transparent font-display text-[26px] font-bold tracking-tight text-ink outline-none placeholder:text-mute"
-            placeholder="Untitled"
-          />
+              Record
+            </Button>
+          )}
+          <ScreenControl screenStatus={screenStatus} onStartScreen={onStartScreen} onStopScreen={onStopScreen} />
+          <Button
+            variant={askOpen ? "soft" : "outline"}
+            size="sm"
+            onClick={() => setAskOpen((o) => !o)}
+            title="Ask questions about this meeting"
+            startIcon={<MessageSquare size={13} strokeWidth={1.75} />}
+          >
+            Ask
+          </Button>
+          <select
+            value={note.folder_id ?? ""}
+            onChange={(e) => onMoveNote(e.target.value === "" ? null : e.target.value)}
+            title="Move to folder"
+            className={FOLDER_SELECT_CLS}
+          >
+            <option value="">Unfiled</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name}
+              </option>
+            ))}
+          </select>
+          <span className="h-5 w-px" style={{ background: "var(--line)" }} />
+          <Button variant="ghost" size="sm" title="Attach file" onClick={() => void attach()} className="!px-2">
+            <Paperclip size={15} strokeWidth={1.75} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            title="Save this note as a Markdown file"
+            onClick={() => void api.exportNote(note.id).catch((e) => alert(String(e)))}
+            className="!px-2"
+          >
+            <FileDown size={15} strokeWidth={1.75} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            title="Print or save as PDF (only the note content prints)"
+            onClick={() => window.print()}
+            className="!px-2"
+          >
+            <Printer size={15} strokeWidth={1.75} />
+          </Button>
+          <span className="ml-0.5 w-14 text-right text-xs" style={{ color: "var(--text-3)" }}>
+            {saveState === "saving" ? "saving…" : "saved"}
+          </span>
         </div>
 
-        {meeting?.recording && (
-          <div className="border-b border-line px-6 py-2">
-            <div className="flex items-center gap-2 rounded-[12px] border border-line bg-peach-2 px-3 py-1.5">
-              <span className="text-[12.5px] text-ink-2">Meeting recording</span>
-              <span className="font-mono text-[11px] text-mute">
-                {fmtElapsed(meeting.recording.duration_ms)}
-              </span>
-              {meeting.recording.mixed_path && (
-                <Btn
-                  variant="ghost"
-                  size="xs"
-                  onClick={() => void api.openAttachment(meeting.recording!.mixed_path!)}
-                >
-                  Play
-                </Btn>
-              )}
-              {meeting.recording.mic_path && (
-                <Btn
-                  variant="ghost"
-                  size="xs"
-                  title="Reveal recording files"
-                  onClick={() => void api.revealAttachment(meeting.recording!.mic_path!)}
-                >
-                  Files
-                </Btn>
-              )}
+        {/* title + meta (fixed context above the toggled content) */}
+        <div className="px-6 pb-3.5 pt-5">
+          <div className="mx-auto max-w-[var(--content-max)]">
+            <input
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                scheduleSave(e.target.value, scratchpad);
+              }}
+              placeholder="Untitled"
+              className="mb-3 w-full bg-transparent font-display text-[28px] font-bold tracking-[-0.02em] text-text outline-none placeholder:text-text-3"
+            />
+            <MetaRow
+              note={note}
+              meeting={meeting}
+              templates={templates}
+              templateId={templateId}
+              setTemplateId={setTemplateId}
+              onShowInFolder={showInFolder}
+              onOpenAttachment={openAttachmentRel}
+              onRemoveAttachment={(id) => void removeAttachment(id)}
+            />
+          </div>
+        </div>
+
+        {/* single content region — one view at a time */}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto max-w-[var(--content-max)] px-6 pb-28 pt-5">
+            {enhanceError && (
+              <div
+                className="mb-4 rounded-xl border border-line px-4 py-3 text-[13px]"
+                style={{ background: "var(--error-soft)", color: "var(--error-text)" }}
+              >
+                {enhanceError}
+              </div>
+            )}
+
+            {/* Transcript view — live pane stays mounted while recording so it keeps
+                listening; it's only shown when the Transcript view is active. */}
+            {isRecordingThisNote && recStatus.meeting_id && (
+              <div style={{ display: showTranscript ? "block" : "none" }}>
+                <LivePane meetingId={recStatus.meeting_id} />
+              </div>
+            )}
+            {showTranscript && !isRecordingThisNote && meeting && (
+              <div>
+                {audioPath && <AudioPlayer durationMs={rec?.duration_ms ?? 0} onPlay={playAudio} />}
+                {videos.length > 0 && <VideoStrip videos={videos} onOpen={openAttachmentRel} />}
+                <TranscriptPanel
+                  meeting={meeting}
+                  transcript={transcript}
+                  stage={pipeStage}
+                  stageDetail={pipeDetail}
+                  modelProgress={modelProgress}
+                  pipelineError={pipelineError}
+                  highlightIds={zoomIds}
+                  onTranscribe={onTranscribe}
+                  onRelabel={onRelabel}
+                />
+              </div>
+            )}
+
+            {/* Enhanced view */}
+            {showEnhanced && <EnhancedDoc note={note} onNoteChanged={onNoteChanged} onZoom={zoom} />}
+
+            {/* Notes view — stays mounted (display toggle) so it keeps content/caret. */}
+            <div style={{ display: showNotes ? "block" : "none" }}>
+              <textarea
+                value={scratchpad}
+                onChange={(e) => {
+                  setScratchpad(e.target.value);
+                  scheduleSave(title, e.target.value);
+                }}
+                onPaste={handlePaste}
+                placeholder="Write your notes… they'll merge with the transcript when you enhance."
+                className="min-h-[60vh] w-full resize-none bg-transparent text-[15px] leading-[1.72] outline-none placeholder:text-text-3"
+                style={{ color: "var(--text)", caretColor: "var(--primary)" }}
+              />
             </div>
           </div>
-        )}
-
-        {recStatus.active && recStatus.note_id === note.id && recStatus.meeting_id ? (
-          <LivePane meetingId={recStatus.meeting_id} />
-        ) : null}
-
-        {meeting && !(recStatus.active && recStatus.note_id === note.id) && (
-          <TranscriptPanel
-            meeting={meeting}
-            transcript={transcript}
-            stage={pipeStage}
-            stageDetail={pipeDetail}
-            modelProgress={modelProgress}
-            pipelineError={pipelineError}
-            highlightIds={zoomIds}
-            onTranscribe={onTranscribe}
-            onRelabel={onRelabel}
-          />
-        )}
-
-        {enhanceError && (
-          <div className="mx-6 my-2 rounded-[12px] border border-line bg-peach-2 p-3 text-[13px] text-clay">
-            ⚠ {enhanceError}
-          </div>
-        )}
-
-        {note.blocks.length > 0 && (
-          <div className="print:hidden flex gap-5 border-b border-line px-6">
-            {(
-              [
-                ["scratch", "Scratchpad"],
-                ["enhanced", "Enhanced"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                onClick={() => setView(id)}
-                className={`-mb-px cursor-pointer border-b-2 bg-transparent px-0.5 py-2 text-[13px] font-semibold transition-colors ${
-                  view === id
-                    ? "border-coral text-ink"
-                    : "border-transparent text-mute hover:text-ink-2"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {view === "enhanced" && note.blocks.length > 0 ? (
-          <EnhancedDoc note={note} onNoteChanged={onNoteChanged} onZoom={zoom} />
-        ) : (
-          <textarea
-            value={scratchpad}
-            onChange={(e) => {
-              setScratchpad(e.target.value);
-              scheduleSave(title, e.target.value);
-            }}
-            onPaste={handlePaste}
-            placeholder="Jot rough notes here during the meeting — then hit Enhance to merge them with the transcript."
-            className="flex-1 resize-none bg-transparent px-6 py-4 text-[15px] leading-[1.75] text-ink outline-none placeholder:text-mute"
-          />
-        )}
-
-        <div className="print:hidden border-t border-line px-6 py-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Btn variant="outline" size="sm" onClick={() => void attach()}>
-              Attach file
-            </Btn>
-            <Btn
-              variant="ghost"
-              size="sm"
-              title="Save this note as a Markdown file"
-              onClick={() => void api.exportNote(note.id).catch((e) => alert(String(e)))}
-            >
-              Export .md
-            </Btn>
-            <Btn
-              variant="ghost"
-              size="sm"
-              title="Print or save as PDF (only the note content prints)"
-              onClick={() => window.print()}
-            >
-              Print / PDF
-            </Btn>
-            {note.attachments.map((a) => (
-              <span
-                key={a.id}
-                className="flex items-center gap-1 rounded-[12px] border border-line bg-peach-2 py-1 pl-2.5 pr-1"
-              >
-                <button
-                  className="cursor-pointer text-[12.5px] text-ink-2 hover:text-clay"
-                  title="Open"
-                  onClick={() => void api.openAttachment(a.rel_path)}
-                >
-                  {a.file_name}
-                </button>
-                <Btn
-                  variant="ghost"
-                  size="xs"
-                  title="Reveal in Explorer"
-                  onClick={() => void api.revealAttachment(a.rel_path)}
-                >
-                  Reveal
-                </Btn>
-                <button
-                  className="cursor-pointer rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-mute transition-colors hover:bg-peach hover:text-rec"
-                  title="Remove attachment"
-                  onClick={() => void removeAttachment(a.id)}
-                >
-                  ✕
-                </button>
-              </span>
-            ))}
-          </div>
         </div>
+
+        {/* floating view switcher (Granola-style) */}
+        <ViewSwitcher
+          view={view}
+          setView={setView}
+          hasMeeting={hasMeeting}
+          enhanced={enhanced}
+          transcriptBusy={!!pipeStage || isRecordingThisNote}
+          onEnhance={() => void enhance()}
+          enhancing={enhancing}
+        />
       </div>
 
       {askOpen && (

@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { Inbox, List, Plus, Settings as SettingsIcon, X } from "lucide-react";
 import type { CalendarEvent, Folder } from "../types";
-import { Btn, SectionLabel, speakerColor } from "./ui";
+import { Badge, Button, SectionLabel } from "./ui";
+import logoLight from "../assets/brand/fly-on-the-wall-logo.svg";
+import logoDark from "../assets/brand/fly-on-the-wall-logo-dark.svg";
 
 export type Selection = { view: "all" } | { view: "unfiled" } | { view: "folder"; id: string };
 
@@ -14,6 +17,10 @@ interface Props {
   onDeleteFolder: (id: string) => void;
   onStartFromEvent: (ev: CalendarEvent) => void;
   onOpenSettings: () => void;
+  /** Resolved theme — picks the wordmark variant (dark logo on the ink shell). */
+  theme?: "light" | "dark";
+  /** File a dragged note into a folder (or null for All notes / Unfiled). */
+  onMoveNote?: (noteId: string, folderId: string | null) => void;
 }
 
 function eventTime(iso: string): string {
@@ -25,6 +32,25 @@ function hashId(id: string): number {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
   return Math.abs(h);
+}
+
+const FOLDER_COLORS = [
+  "var(--primary)",
+  "var(--spk-teal)",
+  "var(--spk-blue)",
+  "var(--spk-pink)",
+  "var(--spk-amber)",
+  "var(--spk-green)",
+  "var(--spk-indigo)",
+];
+const FOLDER_EMOJIS = [
+  "📁", "📂", "🗂️", "💼", "🧑‍💻", "📊", "📈", "📌", "📎", "✅", "🎯", "🚀", "🔥", "⭐",
+  "💡", "🧠", "📝", "🗓️", "👥", "🤝", "🏷️", "🔒", "🌐", "🧩", "🎨", "🛠️", "📣", "☕",
+];
+
+/** A folder's chosen dot color (falls back to a stable rotation color). */
+function folderColor(meta: FolderMeta, id: string): string {
+  return meta.color ?? FOLDER_COLORS[hashId(id) % FOLDER_COLORS.length];
 }
 
 interface TreeNode {
@@ -48,10 +74,13 @@ function buildTree(folders: Folder[]): TreeNode[] {
   return build(null);
 }
 
+type FolderMeta = { color?: string; emoji?: string };
+const META_KEY = "fotw-folder-meta";
+
 const ROW =
-  "flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13.5px] font-medium text-ink";
+  "group flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13.5px] font-medium text-text";
 const INPUT =
-  "rounded-lg border border-line bg-surface px-2 py-1 text-[13px] text-ink outline-none placeholder:text-mute";
+  "rounded-lg border border-line bg-surface px-2 py-1 text-[13px] text-text outline-none placeholder:text-text-3";
 
 export default function Sidebar({
   folders,
@@ -63,6 +92,8 @@ export default function Sidebar({
   onDeleteFolder,
   onStartFromEvent,
   onOpenSettings,
+  theme = "light",
+  onMoveNote,
 }: Props) {
   const tree = useMemo(() => buildTree(folders), [folders]);
   // clock for the LIVE badge, refreshed each minute (render must stay pure)
@@ -76,6 +107,54 @@ export default function Sidebar({
   const [newFolderName, setNewFolderName] = useState("");
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
 
+  // frontend-only folder personalization (color + emoji), persisted locally
+  const [meta, setMeta] = useState<Record<string, FolderMeta>>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(META_KEY) || "{}");
+    } catch {
+      return {};
+    }
+  });
+  const setFolderMeta = (id: string, patch: FolderMeta) =>
+    setMeta((m) => {
+      const next = { ...m, [id]: { ...m[id], ...patch } };
+      try {
+        localStorage.setItem(META_KEY, JSON.stringify(next));
+      } catch {
+        /* storage may be unavailable */
+      }
+      return next;
+    });
+  const [picker, setPicker] = useState<{ id: string; x: number; y: number } | null>(null);
+
+  // drag-drop note filing: which target is currently hovered
+  const [dropId, setDropId] = useState<string | null>(null);
+  const dropProps = (targetFolder: string | null, key: string) =>
+    onMoveNote
+      ? {
+          onDragOver: (e: React.DragEvent) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+          },
+          onDragEnter: (e: React.DragEvent) => {
+            e.preventDefault();
+            setDropId(key);
+          },
+          onDragLeave: (e: React.DragEvent) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setDropId((c) => (c === key ? null : c));
+            }
+          },
+          onDrop: (e: React.DragEvent) => {
+            e.preventDefault();
+            const id = e.dataTransfer.getData("text/plain");
+            if (id) onMoveNote(id, targetFolder);
+            setDropId(null);
+          },
+        }
+      : {};
+  const dropRing = "outline outline-[1.5px] -outline-offset-1 outline-dashed outline-primary bg-primary-soft";
+
   const submitNewFolder = () => {
     const name = newFolderName.trim();
     if (name && newFolderParent !== "none") {
@@ -88,21 +167,40 @@ export default function Sidebar({
   const renderNode = (node: TreeNode, depth: number) => {
     const { folder, children } = node;
     const selected = selection.view === "folder" && selection.id === folder.id;
+    const isDrop = dropId === folder.id;
+    const fmeta = meta[folder.id] || {};
     return (
       <div key={folder.id}>
         <div
-          className={`group ${ROW} ${selected ? "bg-peach" : "hover:bg-peach-2"}`}
+          className={`${ROW} ${selected ? "bg-primary-soft" : "hover:bg-surface-3"} ${isDrop ? dropRing : ""}`}
           style={{ paddingLeft: `${10 + depth * 14}px` }}
           onClick={() => onSelect({ view: "folder", id: folder.id })}
+          {...dropProps(folder.id, folder.id)}
         >
-          <span
-            className="h-[9px] w-[9px] flex-none rounded-full"
-            style={{ background: speakerColor("", hashId(folder.id)) }}
-          />
+          <button
+            title="Folder color & emoji"
+            className="grid h-[18px] w-[18px] flex-none cursor-pointer place-items-center"
+            onClick={(e) => {
+              e.stopPropagation();
+              const r = e.currentTarget.getBoundingClientRect();
+              setPicker((pk) =>
+                pk && pk.id === folder.id ? null : { id: folder.id, x: r.left, y: r.bottom + 6 },
+              );
+            }}
+          >
+            {fmeta.emoji ? (
+              <span className="text-[14px] leading-none">{fmeta.emoji}</span>
+            ) : (
+              <span
+                className="h-[9px] w-[9px] rounded-full"
+                style={{ background: folderColor(fmeta, folder.id) }}
+              />
+            )}
+          </button>
           {renaming?.id === folder.id ? (
             <input
               autoFocus
-              className="w-full rounded-md border border-line bg-surface px-1.5 text-[13px] text-ink outline-none"
+              className="w-full rounded-md border border-line bg-surface px-1.5 text-[13px] text-text outline-none"
               value={renaming.name}
               onChange={(e) => setRenaming({ id: folder.id, name: e.target.value })}
               onBlur={() => {
@@ -128,18 +226,18 @@ export default function Sidebar({
           )}
           <button
             title="New subfolder"
-            className="hidden cursor-pointer text-mute hover:text-ink group-hover:inline"
+            className="hidden flex-none cursor-pointer rounded p-0.5 text-text-3 hover:text-text group-hover:inline-flex"
             onClick={(e) => {
               e.stopPropagation();
               setNewFolderParent(folder.id);
               setNewFolderName("");
             }}
           >
-            +
+            <Plus size={14} strokeWidth={1.75} />
           </button>
           <button
             title="Delete folder"
-            className="hidden cursor-pointer text-mute hover:text-rec group-hover:inline"
+            className="hidden flex-none cursor-pointer rounded p-0.5 text-text-3 hover:text-rec group-hover:inline-flex"
             onClick={(e) => {
               e.stopPropagation();
               if (confirm(`Delete folder "${folder.name}"? Notes inside become unfiled.`)) {
@@ -147,7 +245,7 @@ export default function Sidebar({
               }
             }}
           >
-            ✕
+            <X size={14} strokeWidth={2} />
           </button>
         </div>
         {newFolderParent === folder.id && (
@@ -172,25 +270,33 @@ export default function Sidebar({
 
   return (
     <div className="print:hidden flex h-full w-60 flex-col border-r border-line bg-shell">
-      <div className="flex items-center gap-2.5 px-4 pb-2.5 pt-3.5">
-        <span className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-[9px] bg-coral">
-          <span className="h-3.5 w-3.5 rounded-full border-[3px] border-white" />
-        </span>
-        <span className="font-display text-[19px] font-bold tracking-tight text-ink">Fly on the Wall</span>
+      <div className="flex items-center px-4 pb-2.5 pt-4">
+        <img
+          src={theme === "dark" ? logoDark : logoLight}
+          alt="Fly on the Wall"
+          className="block h-auto w-[168px] select-none"
+          draggable={false}
+        />
       </div>
       <nav className="flex-1 overflow-y-auto px-3 pb-3">
         <div
-          className={`${ROW} ${selection.view === "all" ? "bg-peach" : "hover:bg-peach-2"}`}
+          className={`${ROW} ${selection.view === "all" ? "bg-primary-soft" : "hover:bg-surface-3"} ${
+            dropId === "all" ? dropRing : ""
+          }`}
           onClick={() => onSelect({ view: "all" })}
+          {...dropProps(null, "all")}
         >
-          <span className="h-3 w-3 flex-none rounded bg-mute/55" />
+          <List size={15} strokeWidth={1.75} className="flex-none text-text-3" />
           All notes
         </div>
         <div
-          className={`${ROW} ${selection.view === "unfiled" ? "bg-peach" : "hover:bg-peach-2"}`}
+          className={`${ROW} ${selection.view === "unfiled" ? "bg-primary-soft" : "hover:bg-surface-3"} ${
+            dropId === "unfiled" ? dropRing : ""
+          }`}
           onClick={() => onSelect({ view: "unfiled" })}
+          {...dropProps(null, "unfiled")}
         >
-          <span className="h-3 w-3 flex-none rounded border-[1.5px] border-mute/70" />
+          <Inbox size={15} strokeWidth={1.75} className="flex-none text-text-3" />
           Unfiled
         </div>
         {upcoming.length > 0 && (
@@ -202,30 +308,30 @@ export default function Sidebar({
               return (
                 <div
                   key={`${ev.provider}-${ev.id}`}
-                  className="group mt-0.5 rounded-lg px-2.5 py-1.5 hover:bg-peach-2"
+                  className="group mt-0.5 rounded-lg px-2.5 py-1.5 hover:bg-surface-3"
                 >
                   <div className="flex items-center gap-1.5">
                     {live && (
-                      <span className="flex-none rounded bg-rec px-1 py-px text-[9.5px] font-semibold leading-[14px] text-white">
-                        LIVE
-                      </span>
+                      <Badge tone="live" size="sm" uppercase>
+                        Live
+                      </Badge>
                     )}
-                    <span className="truncate text-[13px] font-semibold text-ink">{ev.title}</span>
+                    <span className="truncate text-[13px] font-semibold text-text">{ev.title}</span>
                   </div>
                   <div className="flex items-center justify-between gap-1.5">
-                    <span className="truncate text-[11.5px] text-mute">
+                    <span className="truncate text-[11.5px] text-text-3">
                       {eventTime(ev.start)}–{eventTime(ev.end)} ·{" "}
                       {ev.provider === "google" ? "Google" : "Outlook"}
                     </span>
                     <span className="hidden flex-none group-hover:inline-flex">
-                      <Btn
+                      <Button
                         variant="soft"
                         size="xs"
                         title="Start note + recording for this meeting"
                         onClick={() => onStartFromEvent(ev)}
                       >
                         Start
-                      </Btn>
+                      </Button>
                     </span>
                   </div>
                 </div>
@@ -235,7 +341,7 @@ export default function Sidebar({
         )}
         <div className="mt-4 flex items-center justify-between pb-1 pl-2.5 pr-1">
           <SectionLabel>Folders</SectionLabel>
-          <Btn
+          <Button
             variant="ghost"
             size="xs"
             title="New folder"
@@ -244,8 +350,8 @@ export default function Sidebar({
               setNewFolderName("");
             }}
           >
-            +
-          </Btn>
+            <Plus size={14} strokeWidth={1.75} />
+          </Button>
         </div>
         {newFolderParent === null && (
           <input
@@ -265,11 +371,67 @@ export default function Sidebar({
       </nav>
       <button
         onClick={onOpenSettings}
-        className="flex cursor-pointer items-center gap-2.5 border-t border-line px-4 py-2.5 text-left text-[13px] font-medium text-ink-2 hover:bg-peach-2 hover:text-ink"
+        className="flex cursor-pointer items-center gap-2.5 border-t border-line px-4 py-2.5 text-left text-[13px] font-medium text-text-2 hover:bg-surface-3 hover:text-text"
       >
-        <span className="h-3 w-3 flex-none rounded-full border-2 border-mute/60" />
+        <SettingsIcon size={15} strokeWidth={1.75} className="flex-none" />
         Settings
       </button>
+
+      {/* folder color + emoji picker popover (fixed so the sidebar's overflow can't clip it) */}
+      {picker && (
+        <>
+          <div className="fixed inset-0 z-50" onClick={() => setPicker(null)} />
+          <div
+            className="fixed z-[51] w-[214px] rounded-xl border border-line bg-surface p-2.5 shadow-pop"
+            style={{ left: picker.x, top: picker.y, boxShadow: "var(--shadow-pop)" }}
+          >
+            <div className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.06em] text-text-3">
+              Color
+            </div>
+            <div className="mb-2.5 flex flex-wrap gap-1.5">
+              {FOLDER_COLORS.map((c) => {
+                const on = (meta[picker.id] || {}).color === c;
+                return (
+                  <button
+                    key={c}
+                    title="Set color"
+                    onClick={() => setFolderMeta(picker.id, { color: c })}
+                    className="h-5 w-5 cursor-pointer rounded-full"
+                    style={{
+                      background: c,
+                      border: on ? "2px solid var(--text)" : "2px solid transparent",
+                      boxShadow: "0 0 0 1px var(--line)",
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[10.5px] font-bold uppercase tracking-[0.06em] text-text-3">
+                Emoji
+              </span>
+              <button
+                className="cursor-pointer text-[11px] font-semibold text-primary-text"
+                onClick={() => setFolderMeta(picker.id, { emoji: undefined })}
+              >
+                Clear
+              </button>
+            </div>
+            <div className="grid max-h-[132px] grid-cols-7 gap-0.5 overflow-y-auto">
+              {FOLDER_EMOJIS.map((e) => (
+                <button
+                  key={e}
+                  title={`Use ${e}`}
+                  onClick={() => setFolderMeta(picker.id, { emoji: e })}
+                  className="cursor-pointer rounded-md py-1 text-[16px] leading-none hover:bg-surface-3"
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

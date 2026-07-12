@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Meeting, ModelProgress, Transcript } from "../types";
+import { Pencil } from "lucide-react";
 import { fmtElapsed } from "./RecordingBar";
-import { Btn, SectionLabel, speakerColor, speakerInitials } from "./ui";
+import { Avatar, Button, ProgressBar, SectionLabel, speakerColor } from "./ui";
 
 interface Props {
   meeting: Meeting;
@@ -30,6 +31,64 @@ const STAGE_LABELS: Record<string, string> = {
   saving: "Saving transcript…",
 };
 
+/** Editable speaker name: quiet dashed underline on hover, click renames it
+ *  everywhere (commit calls the existing onRelabel handler). */
+function SpeakerName({
+  label,
+  color,
+  onRename,
+}: {
+  label: string;
+  color: string;
+  onRename: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(label);
+  const [hov, setHov] = useState(false);
+  useEffect(() => setVal(label), [label]);
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={() => {
+          setEditing(false);
+          if (val.trim()) onRename(val.trim());
+          else setVal(label);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          }
+          if (e.key === "Escape") {
+            setVal(label);
+            setEditing(false);
+          }
+        }}
+        className="rounded-md border bg-surface px-1.5 py-px text-xs font-semibold outline-none"
+        style={{ color, borderColor: "var(--primary)", width: Math.max(56, val.length * 7.5) }}
+      />
+    );
+  }
+  return (
+    <span
+      role="button"
+      title="Click to rename"
+      onClick={() => setEditing(true)}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      className="inline-flex cursor-text items-center gap-1 text-xs font-semibold"
+      style={{ color, borderBottom: `1px dashed ${hov ? "currentColor" : "transparent"}` }}
+    >
+      {label}
+      {hov && <Pencil size={11} strokeWidth={1.75} style={{ opacity: 0.65 }} />}
+    </span>
+  );
+}
+
 export default function TranscriptPanel({
   meeting,
   transcript,
@@ -41,7 +100,6 @@ export default function TranscriptPanel({
   onTranscribe,
   onRelabel,
 }: Props) {
-  const [renaming, setRenaming] = useState<{ key: string; label: string } | null>(null);
   const segRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Zoom-in: scroll the first highlighted source segment into view.
@@ -63,26 +121,33 @@ export default function TranscriptPanel({
         ? Math.round((modelProgress.downloaded / modelProgress.total) * 100)
         : null;
     return (
-      <div className="print:hidden border-b border-line bg-cream px-6 py-3">
-        <div className="flex items-center gap-2.5 text-[13px] font-medium text-clay">
+      <div
+        className="print:hidden mb-4 rounded-lg border px-3.5 py-3"
+        style={{ background: "var(--primary-soft)", borderColor: "var(--primary-border)" }}
+      >
+        <div
+          className="flex flex-wrap items-center gap-2 text-[13px] font-medium"
+          style={{ color: "var(--primary-soft-text)" }}
+        >
           <span
-            className="h-2 w-2 shrink-0 rounded-full bg-coral"
-            style={{ animation: "pulse-dot 1s ease infinite" }}
+            className="h-2 w-2 shrink-0 rounded-full"
+            style={{ background: "var(--primary)", animation: "fly-pulse-dot 1.2s ease infinite" }}
           />
           <span>{STAGE_LABELS[stage] ?? stage}</span>
-          {stageDetail && <span className="font-normal text-mute">— {stageDetail}</span>}
+          {stageDetail && (
+            <span className="font-normal" style={{ color: "var(--text-3)" }}>
+              — {stageDetail}
+            </span>
+          )}
           {pct !== null && (
-            <span className="font-normal text-mute">
-              downloading {modelProgress!.id} — {pct}%
+            <span className="font-normal" style={{ color: "var(--text-3)" }}>
+              downloading {modelProgress?.id} — {pct}%
             </span>
           )}
         </div>
         {pct !== null && (
-          <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-line">
-            <div
-              className="h-full rounded-full bg-coral transition-all"
-              style={{ width: `${pct}%` }}
-            />
+          <div className="mt-2">
+            <ProgressBar value={pct} />
           </div>
         )}
       </div>
@@ -92,18 +157,21 @@ export default function TranscriptPanel({
   if (!transcript) {
     if (!meeting.recording) return null;
     return (
-      <div className="border-b border-line bg-cream px-6 py-2.5">
-        <div className="flex items-center gap-3">
-          <Btn variant="primary" size="sm" onClick={onTranscribe}>
+      <div className="mb-4 rounded-xl border border-line px-4 py-3" style={{ background: "var(--surface-2)" }}>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="primary" size="sm" onClick={onTranscribe}>
             Transcribe recording
-          </Btn>
-          <span className="text-xs text-mute">
+          </Button>
+          <span className="text-xs" style={{ color: "var(--text-3)" }}>
             Runs fully on this machine — audio never leaves your computer.
           </span>
         </div>
         {pipelineError && (
-          <div className="mt-2 rounded-[12px] border border-line bg-peach-2 p-3 text-[13px] text-clay">
-            ⚠ {pipelineError}
+          <div
+            className="mt-2 rounded-lg border border-line px-3 py-2 text-[13px]"
+            style={{ background: "var(--error-soft)", color: "var(--error-text)" }}
+          >
+            {pipelineError}
           </div>
         )}
       </div>
@@ -111,19 +179,20 @@ export default function TranscriptPanel({
   }
 
   return (
-    <div className="max-h-72 overflow-y-auto border-b border-line bg-cream px-6 py-3">
-      <div className="mb-3 flex items-baseline gap-2">
+    <div>
+      <div className="mb-4 flex items-baseline gap-2">
         <SectionLabel>Transcript</SectionLabel>
-        <span className="text-[11px] text-mute">
-          · {transcript.engine}
-          {transcript.language ? ` · ${transcript.language}` : ""} · click a name to rename
+        <span className="text-[11px]" style={{ color: "var(--text-3)" }}>
+          · click any line or name to edit
         </span>
       </div>
       {transcript.segments.map((seg) => {
         const isSelf = seg.speaker_key === "mic";
-        const color = speakerColor(seg.speaker_key, speakerIndex(seg.speaker_key));
+        const idx = speakerIndex(seg.speaker_key);
+        const color = speakerColor(seg.speaker_key, idx);
         const label =
           transcript.speakers.find((s) => s.key === seg.speaker_key)?.label ?? seg.speaker_key;
+        const hot = highlightIds.includes(seg.id);
         return (
           <div
             key={seg.id}
@@ -131,49 +200,33 @@ export default function TranscriptPanel({
               if (el) segRefs.current.set(seg.id, el);
               else segRefs.current.delete(seg.id);
             }}
-            className={`mb-3 flex rounded-xl ${isSelf ? "justify-end" : ""} ${
-              highlightIds.includes(seg.id) ? "bg-peach outline outline-1 outline-coral/60" : ""
-            }`}
+            className={`mb-3.5 flex rounded-lg ${isSelf ? "justify-end" : "justify-start"}`}
+            style={hot ? { background: "var(--primary-soft)", outline: "1.5px solid var(--primary)", padding: 4 } : undefined}
           >
-            <div className="min-w-0 max-w-[86%]">
+            <div className="min-w-0" style={{ maxWidth: "86%" }}>
               <div className={`mb-1 flex items-center gap-1.5 ${isSelf ? "justify-end" : ""}`}>
-                <span
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-white"
-                  style={{ background: color }}
-                >
-                  {speakerInitials(label)}
+                <Avatar name={label} color={color} shape="circle" size="xs" />
+                <SpeakerName
+                  label={label}
+                  color={color}
+                  onRename={(name) => onRelabel(seg.speaker_key, name)}
+                />
+                <span className="font-mono text-[11px]" style={{ color: "var(--text-3)" }}>
+                  {fmtElapsed(seg.start_ms)}
                 </span>
-                {renaming?.key === seg.speaker_key ? (
-                  <input
-                    autoFocus
-                    className="w-32 rounded border border-line bg-surface px-1 text-xs text-ink outline-none focus:border-coral"
-                    value={renaming.label}
-                    onChange={(e) => setRenaming({ key: seg.speaker_key, label: e.target.value })}
-                    onBlur={() => {
-                      if (renaming.label.trim()) onRelabel(seg.speaker_key, renaming.label.trim());
-                      setRenaming(null);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") e.currentTarget.blur();
-                      if (e.key === "Escape") setRenaming(null);
-                    }}
-                  />
-                ) : (
-                  <button
-                    className="cursor-pointer text-xs font-semibold hover:underline"
-                    style={{ color }}
-                    title="Rename speaker"
-                    onClick={() => setRenaming({ key: seg.speaker_key, label })}
-                  >
-                    {label}
-                  </button>
-                )}
-                <span className="font-mono text-[11px] text-mute">{fmtElapsed(seg.start_ms)}</span>
               </div>
               <div
-                className={`rounded-xl border border-line px-3 py-2 text-[14px] leading-[1.55] text-ink ${
-                  isSelf ? "bg-peach" : "bg-surface"
-                }`}
+                contentEditable
+                suppressContentEditableWarning
+                spellCheck={false}
+                onFocus={(e) => (e.currentTarget.style.borderColor = "var(--primary)")}
+                onBlur={(e) => (e.currentTarget.style.borderColor = "var(--line)")}
+                className="rounded-xl border px-3 py-2 text-[14px] leading-[1.55] outline-none"
+                style={{
+                  borderColor: "var(--line)",
+                  color: "var(--text)",
+                  background: isSelf ? "var(--primary-soft)" : "var(--surface-2)",
+                }}
               >
                 {seg.text}
               </div>

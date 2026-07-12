@@ -1,5 +1,6 @@
+import { Square } from "lucide-react";
 import type { RecordingStatus } from "../types";
-import { Btn } from "./ui";
+import { Button, RecordingIndicator } from "./ui";
 
 interface Props {
   status: RecordingStatus;
@@ -20,10 +21,9 @@ export function fmtElapsed(ms: number): string {
     : `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-const WAVE_DELAYS = ["0s", ".15s", ".3s", ".45s", ".6s"];
-
-/** Always-visible consent/recording indicator (spec §9): while a capture is
- *  live this bar is pinned above everything, on every view. */
+/** Always-visible recording bar (spec §9): while a capture is live this bar is
+ *  pinned above everything on every view, on a violet-soft ground, with the
+ *  unmissable "system output muted" warning strip on ink beneath it. */
 export default function RecordingBar({
   status,
   noteTitle,
@@ -36,59 +36,46 @@ export default function RecordingBar({
   const paused = status.state === "paused";
 
   return (
-    <div className="print:hidden flex flex-wrap items-center gap-3 border-b border-line bg-peach px-4 py-2 text-sm">
-      <span
-        className={`h-2.5 w-2.5 flex-none rounded-full ${paused ? "bg-spk-amber" : "bg-rec"}`}
-        style={paused ? undefined : { animation: "pulse-dot 1.2s ease infinite" }}
-      />
-      <span className="text-[13px] font-semibold text-ink">
-        {paused ? "Recording paused" : "Recording"}
-      </span>
-      <span className="font-mono text-[13px] tabular-nums text-ink">
-        {fmtElapsed(status.elapsed_ms)}
-      </span>
-      {!paused && (
-        <span className="flex h-4 flex-none items-end gap-[3px]">
-          {WAVE_DELAYS.map((delay) => (
-            <span
-              key={delay}
-              className="h-full w-[3px] rounded-full bg-coral"
-              style={{
-                animation: `wave .9s ease-in-out ${delay} infinite`,
-                transform: "scaleY(.32)",
-                transformOrigin: "bottom",
-              }}
-            />
-          ))}
-        </span>
-      )}
-      {noteTitle && (
-        <button
-          className="cursor-pointer truncate text-clay underline-offset-2 hover:underline"
-          onClick={onOpenNote}
-        >
-          {noteTitle}
-        </button>
-      )}
-      <div className="ml-auto flex items-center gap-2">
-        {paused ? (
-          <Btn variant="outline" size="sm" onClick={onResume}>
-            Resume
-          </Btn>
-        ) : (
-          <Btn variant="outline" size="sm" onClick={onPause}>
-            Pause
-          </Btn>
+    <div className="print:hidden">
+      <div className="flex flex-wrap items-center gap-3 border-b border-line bg-primary-soft px-4 py-2">
+        <RecordingIndicator
+          state={paused ? "paused" : "recording"}
+          label={paused ? "Recording paused" : "Recording"}
+          elapsedMs={status.elapsed_ms}
+        />
+        {noteTitle && (
+          <button
+            className="cursor-pointer truncate text-[13px] text-primary-soft-text underline-offset-2 hover:underline"
+            onClick={onOpenNote}
+          >
+            {noteTitle}
+          </button>
         )}
-        <Btn variant="dark" size="sm" onClick={onStop}>
-          Stop
-        </Btn>
+        <div className="ml-auto flex items-center gap-2">
+          {paused ? (
+            <Button variant="outline" size="sm" onClick={onResume}>
+              Resume
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={onPause}>
+              Pause
+            </Button>
+          )}
+          <Button
+            variant="contrast"
+            size="sm"
+            onClick={onStop}
+            startIcon={<Square size={11} strokeWidth={1.75} />}
+          >
+            Stop
+          </Button>
+        </div>
       </div>
       {status.warnings.length > 0 && (
-        <div className="-mx-4 -mb-2 w-[calc(100%+2rem)] bg-ink px-4 py-1.5">
+        <div className="bg-brand-ink px-4 py-1.5">
           {status.warnings.map((w) => (
-            <p key={w} className="text-[12.5px] font-medium text-white">
-              <span className="mr-1.5 inline-block h-2 w-2 rounded-full bg-spk-amber align-baseline" />
+            <p key={w} className="flex items-center gap-2 text-[12.5px] font-medium text-brand-cream">
+              <span className="h-2 w-2 flex-none rounded-full bg-warning" />
               {w}
             </p>
           ))}

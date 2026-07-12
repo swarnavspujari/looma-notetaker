@@ -2,8 +2,9 @@ import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { AskMessage } from "../types";
+import { X } from "lucide-react";
 import { api } from "../api";
-import { Btn, SectionLabel } from "./ui";
+import { Button, SectionLabel } from "./ui";
 
 interface Props {
   noteId: string;
@@ -47,60 +48,70 @@ export default function AskPanel({ noteId, onInsert, onClose }: Props) {
   };
 
   return (
-    <div className="print:hidden flex w-80 shrink-0 flex-col border-l border-line bg-cream">
-      <div className="flex items-center justify-between border-b border-line px-3 py-2">
-        <SectionLabel>Ask Fly on the Wall</SectionLabel>
-        <Btn variant="ghost" size="xs" onClick={onClose}>
-          ✕
-        </Btn>
+    <div
+      className="print:hidden flex shrink-0 flex-col border-l border-line"
+      style={{ width: "var(--askpanel-w)", background: "var(--bg)" }}
+    >
+      <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
+        <SectionLabel>Ask this meeting</SectionLabel>
+        <Button variant="ghost" size="xs" onClick={onClose} aria-label="Close">
+          <X size={14} strokeWidth={1.75} />
+        </Button>
       </div>
-      <div className="border-b border-line px-3 py-1.5 text-[11px] leading-snug text-mute">
-        Chat is ephemeral — it disappears when you close it unless you insert an answer.
+      <div className="border-b border-line px-3 py-2 text-[11px] leading-snug" style={{ color: "var(--text-3)" }}>
+        Chat is ephemeral — insert an answer to keep it.
       </div>
       <div className="flex flex-1 flex-col gap-3 overflow-y-auto p-3">
         {history.length === 0 && (
           <div className="flex flex-wrap gap-1.5">
             {QUICK_PROMPTS.map((q) => (
-              <Btn key={q} variant="soft" size="xs" onClick={() => void send(q)}>
+              <Button key={q} variant="soft" size="xs" onClick={() => void send(q)}>
                 {q}
-              </Btn>
+              </Button>
             ))}
           </div>
         )}
         {history.map((m, i) => (
           <div
             key={i}
-            className={`flex max-w-[85%] flex-col gap-1.5 ${
+            className={`flex max-w-[88%] flex-col gap-1.5 ${
               m.role === "user" ? "items-end self-end" : "items-start self-start"
             }`}
           >
             <div
-              className={`rounded-[14px] border border-line px-3.5 py-2.5 text-left text-[14px] leading-relaxed text-ink ${
-                m.role === "user" ? "bg-peach" : "bg-surface"
-              }`}
+              className="rounded-[14px] border border-line px-3.5 py-2.5 text-left text-[14px] leading-relaxed"
+              style={{ color: "var(--text)", background: m.role === "user" ? "var(--primary-soft)" : "var(--surface)" }}
             >
-              <div className="[&_a]:text-clay [&_a]:underline [&_li]:ml-4 [&_li]:list-disc [&_p]:my-1">
+              <div className="[&_a]:text-primary-text [&_a]:underline [&_li]:ml-4 [&_li]:list-disc [&_p]:my-1">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
               </div>
             </div>
             {m.role === "assistant" && (
-              <Btn variant="soft" size="xs" onClick={() => onInsert(m.content)}>
-                ↳ Insert into note
-              </Btn>
+              <Button variant="soft" size="xs" onClick={() => onInsert(m.content)}>
+                Insert into note
+              </Button>
             )}
           </div>
         ))}
         {busy && (
-          <div className="flex items-center gap-2 self-start px-1 text-xs font-medium text-clay">
+          <div className="flex items-center gap-2 self-start px-1 text-xs font-medium" style={{ color: "var(--primary-soft-text)" }}>
             <span className="flex items-center gap-1">
-              <span className="h-1.5 w-1.5 animate-[pulse-dot_1s_ease-in-out_infinite] rounded-full bg-coral" />
-              <span className="h-1.5 w-1.5 animate-[pulse-dot_1s_ease-in-out_0.2s_infinite] rounded-full bg-coral" />
-              <span className="h-1.5 w-1.5 animate-[pulse-dot_1s_ease-in-out_0.4s_infinite] rounded-full bg-coral" />
+              {[0, 0.2, 0.4].map((d) => (
+                <span
+                  key={d}
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: "var(--primary)", animation: `fly-pulse-dot 1s ease-in-out ${d}s infinite` }}
+                />
+              ))}
             </span>
             thinking…
           </div>
         )}
-        {error && <div className="text-xs font-medium text-clay">⚠ {error}</div>}
+        {error && (
+          <div className="text-xs font-medium" style={{ color: "var(--error-text)" }}>
+            {error}
+          </div>
+        )}
       </div>
       <div className="flex gap-2 border-t border-line p-3">
         <textarea
@@ -114,11 +125,14 @@ export default function AskPanel({ noteId, onInsert, onClose }: Props) {
           }}
           placeholder="Ask about this meeting…"
           rows={1}
-          className="flex-1 resize-none rounded-[11px] border border-line bg-surface px-3.5 py-2.5 text-[14px] text-ink outline-none placeholder:text-mute focus:border-coral"
+          onFocus={(e) => (e.currentTarget.style.borderColor = "var(--primary)")}
+          onBlur={(e) => (e.currentTarget.style.borderColor = "var(--line)")}
+          className="flex-1 resize-none rounded-[11px] border px-3.5 py-2.5 text-[14px] outline-none placeholder:text-text-3"
+          style={{ background: "var(--surface)", borderColor: "var(--line)", color: "var(--text)" }}
         />
-        <Btn variant="primary" size="md" onClick={() => void send(input)}>
+        <Button variant="primary" size="md" onClick={() => void send(input)}>
           Send
-        </Btn>
+        </Button>
       </div>
     </div>
   );

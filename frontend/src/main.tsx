@@ -1,3 +1,8 @@
+// Dev-only: install the mock Tauri IPC BEFORE anything imports @tauri-apps/api
+// (this side-effect import must stay first). It self-guards to dev + plain
+// browser and is dead-code-eliminated from production builds.
+import "./devMock";
+
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";

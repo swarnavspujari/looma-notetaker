@@ -18,6 +18,9 @@ import type {
   Transcript,
 } from "./types";
 import { readNotesCache, writeNotesCache } from "./notesCache";
+import { useTheme } from "./theme";
+import logoLight from "./assets/brand/fly-on-the-wall-logo.svg";
+import logoDark from "./assets/brand/fly-on-the-wall-logo-dark.svg";
 import Sidebar, { type Selection } from "./components/Sidebar";
 import NoteList from "./components/NoteList";
 import Editor from "./components/Editor";
@@ -37,6 +40,8 @@ const IDLE_STATUS: RecordingStatus = {
 };
 
 export default function App() {
+  // Theme: defaults to "system" and follows the OS (see src/theme.ts).
+  const { resolved } = useTheme();
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [selection, setSelection] = useState<Selection>({ view: "all" });
@@ -219,6 +224,13 @@ export default function App() {
     await refreshNotes();
   };
 
+  // Drag-drop filing: a note dragged from the list onto a Sidebar folder / All notes.
+  const moveNoteToFolder = async (noteId: string, folderId: string | null) => {
+    await api.moveNote(noteId, folderId);
+    if (openNote?.id === noteId) setOpenNote({ ...openNote, folder_id: folderId });
+    await refreshNotes();
+  };
+
   const onNoteChanged = (note: Note) => {
     setOpenNote(note);
     void refreshNotes();
@@ -322,7 +334,7 @@ export default function App() {
       : null;
 
   return (
-    <div className="flex h-screen flex-col bg-shell font-sans text-ink">
+    <div className="flex h-screen flex-col bg-shell font-sans text-text">
       <RecordingBar
         status={recStatus}
         noteTitle={recordingNoteTitle}
@@ -352,6 +364,8 @@ export default function App() {
           }
           onStartFromEvent={(ev) => void startFromEvent(ev)}
           onOpenSettings={() => setShowSettings(true)}
+          theme={resolved}
+          onMoveNote={(id, fid) => void moveNoteToFolder(id, fid)}
         />
         <NoteList
           notes={notes}
@@ -386,38 +400,36 @@ export default function App() {
             onRelabel={(k, l) => void relabel(k, l)}
           />
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-5 bg-surface text-mute">
+          <div className="flex flex-1 flex-col items-center justify-center gap-5 bg-surface text-text-3">
             <div className="text-center">
-              <div className="flex items-center justify-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-coral">
-                  <span className="h-4 w-4 rounded-full border-[3px] border-white" />
-                </span>
-                <span className="font-display text-4xl font-bold tracking-tight text-ink">
-                  Fly on the Wall
-                </span>
-              </div>
-              <div className="mt-3 text-sm text-ink-2">
+              <img
+                src={resolved === "dark" ? logoDark : logoLight}
+                alt="Fly on the Wall"
+                className="mx-auto block h-auto w-[260px] select-none"
+                draggable={false}
+              />
+              <div className="mt-3 text-sm text-text-2">
                 Select a note, create one, or start recording.
               </div>
             </div>
             {!recStatus.active && (
               <button
                 onClick={() => void startRecording()}
-                className="inline-flex cursor-pointer items-center gap-2.5 rounded-xl bg-coral px-5 py-3 text-sm font-semibold text-white transition-[filter] hover:brightness-105"
+                className="inline-flex cursor-pointer items-center gap-2.5 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-on-primary transition-[filter] hover:brightness-105"
               >
-                <span className="h-3 w-3 rounded-full bg-white" /> Start a meeting
+                <span className="h-3 w-3 rounded-full bg-on-primary" /> Start a meeting
               </button>
             )}
           </div>
         )}
       </div>
-      <footer className="print:hidden flex items-center justify-between border-t border-line bg-shell px-4 py-1.5 text-xs text-mute">
-        <span className={error ? "font-medium text-clay" : undefined}>
+      <footer className="print:hidden flex items-center justify-between border-t border-line bg-shell px-4 py-1.5 text-xs text-text-3">
+        <span className={error ? "font-medium text-error-text" : undefined}>
           {error ? `⚠ ${error}` : "local-first · offline capable"}
         </span>
         {info && (
           <button
-            className="cursor-pointer hover:text-ink"
+            className="cursor-pointer hover:text-text"
             title="Reveal data folder in Explorer"
             onClick={() => void api.revealDataDir()}
           >

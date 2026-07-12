@@ -1,4 +1,6 @@
+import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useState } from "react";
+import { Check, Copy, Plus } from "lucide-react";
 import { api } from "../api";
 import type {
   AsrSettings,
@@ -8,7 +10,8 @@ import type {
   ModelProgress,
   Template,
 } from "../types";
-import { Btn, ModalShell, SectionLabel } from "./ui";
+import { Badge, Button, Card, Checkbox, Input, Modal, ProgressBar, SectionLabel, Select } from "./ui";
+import { useTheme } from "../theme";
 import type { Updater } from "../updater";
 
 interface Props {
@@ -26,16 +29,131 @@ const TIERS = [
   { id: "cloud", label: "Cloud (Groq)", desc: "For weak devices — audio LEAVES this machine" },
 ];
 
-/* Shared field chrome for inputs/selects/textareas in this modal. */
-const FIELD =
-  "rounded-lg border border-line bg-surface px-3 py-1.5 text-sm text-ink outline-none placeholder:text-mute focus:border-coral";
-const PROMPT_BOX =
-  "w-full rounded-lg border border-dashed border-line bg-peach-2 p-2 text-[13px] text-ink outline-none placeholder:text-mute focus:border-coral";
+/* Textarea chrome matched to the token field recipe (see USAGE.md). */
+const TEXTAREA: CSSProperties = {
+  width: "100%",
+  fontFamily: "var(--font-sans)",
+  fontSize: "13px",
+  lineHeight: 1.5,
+  color: "var(--text)",
+  background: "var(--surface-2)",
+  border: "1px dashed var(--line)",
+  borderRadius: "var(--radius-md)",
+  padding: "8px 12px",
+  outline: "none",
+  resize: "vertical",
+};
+const MONO_KEY: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "12px" };
+/* "LEAVES this machine" emphasis pill in the cloud-tier tooltip/warning. */
+const LEAVES_PILL: CSSProperties = {
+  display: "inline-block",
+  background: "var(--warning-soft)",
+  color: "var(--warning-text)",
+  fontWeight: 700,
+  fontSize: "10px",
+  letterSpacing: "0.04em",
+  padding: "0 6px",
+  borderRadius: "var(--radius-pill)",
+  verticalAlign: "baseline",
+};
 
 function gb(bytes: number): string {
   return bytes >= 1_000_000_000
     ? `${(bytes / 1_000_000_000).toFixed(1)} GB`
     : `${Math.round(bytes / 1_000_000)} MB`;
+}
+
+/* ------------------------------------------------------------------ Segmented
+   Composed pill control (Simple/Technical, tiers, appearance, provider).
+   Built inline per the design template's <Segmented> — no shipped primitive. */
+type SegOption = [string, ReactNode, ReactNode?];
+
+function Segmented({
+  value,
+  onChange,
+  options,
+  full = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: SegOption[];
+  full?: boolean;
+}) {
+  const [hint, setHint] = useState<string | null>(null);
+  const last = options.length - 1;
+  return (
+    <div
+      style={{
+        display: full ? "flex" : "inline-flex",
+        width: full ? "100%" : undefined,
+        padding: 3,
+        gap: 3,
+        flex: "none",
+        borderRadius: "var(--radius-pill)",
+        border: "1px solid var(--line)",
+        background: "var(--surface-2)",
+      }}
+    >
+      {options.map(([id, l, tip], i) => {
+        const on = value === id;
+        // keep edge tooltips inside the panel: first anchors left, last right, middle centers
+        const anchor: CSSProperties =
+          i === 0 ? { left: 0 } : i === last ? { right: 0 } : { left: "50%", transform: "translateX(-50%)" };
+        return (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onChange(id)}
+            onMouseEnter={tip ? () => setHint(id) : undefined}
+            onMouseLeave={tip ? () => setHint((h) => (h === id ? null : h)) : undefined}
+            style={{
+              position: "relative",
+              flex: full ? 1 : undefined,
+              border: "none",
+              cursor: "pointer",
+              borderRadius: "var(--radius-pill)",
+              padding: "5px 13px",
+              fontSize: "12.5px",
+              fontWeight: 600,
+              fontFamily: "var(--font-sans)",
+              whiteSpace: "nowrap",
+              background: on ? "var(--primary)" : "transparent",
+              color: on ? "var(--on-primary)" : "var(--text-2)",
+              transition: "background .12s, color .12s",
+            }}
+          >
+            {l}
+            {tip && hint === id && (
+              <span
+                role="tooltip"
+                style={{
+                  position: "absolute",
+                  bottom: "calc(100% + 8px)",
+                  ...anchor,
+                  zIndex: 20,
+                  width: 200,
+                  maxWidth: "60vw",
+                  whiteSpace: "normal",
+                  textAlign: "left",
+                  background: "var(--text)",
+                  color: "var(--surface)",
+                  fontSize: "11.5px",
+                  fontWeight: 500,
+                  lineHeight: 1.45,
+                  padding: "7px 10px",
+                  borderRadius: 8,
+                  boxShadow: "var(--shadow-lg)",
+                  pointerEvents: "none",
+                }}
+              >
+                {tip}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 export default function SettingsModal({
@@ -55,6 +173,11 @@ export default function SettingsModal({
   const [groqKey, setGroqKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
+
+  // Presentational view mode — Technical reveals model installs, GPU + OAuth details.
+  const [technical, setTechnical] = useState(false);
+  // Appearance control (System / Light / Dark) — wired to the shared theme hook.
+  const { theme, setTheme } = useTheme();
 
   // LLM provider state
   const [llm, setLlm] = useState<LlmSettings | null>(null);
@@ -263,86 +386,169 @@ export default function SettingsModal({
   const asrModels = settings?.models.filter((m) => m.id.startsWith("ggml-")) ?? [];
   const otherModels = settings?.models.filter((m) => !m.id.startsWith("ggml-")) ?? [];
 
+  const groqHasKey = !!settings?.has_groq_key || !!groqKey;
+  const showGroqCard = tier === "cloud" || useGroq;
+
   return (
-    /* Wrapper catches bubbled overlay clicks so click-outside still closes;
-       the card content stops propagation. */
-    <div onClick={onClose}>
-      <ModalShell className="w-[640px] max-w-[92vw] p-0">
-        <div onClick={(e) => e.stopPropagation()}>
-          <div className="flex items-center justify-between border-b border-line px-6 pt-5 pb-4">
-            <h2 className="font-display text-xl font-bold tracking-tight text-ink">Settings</h2>
-            <Btn variant="ghost" size="sm" onClick={onClose} aria-label="Close settings">
-              ✕
-            </Btn>
+    <Modal
+      open
+      onClose={onClose}
+      title="Settings"
+      width={640}
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" disabled={saving} onClick={() => void save()}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+        {/* View mode — Simple hides model installs / GPU / OAuth details */}
+        <section className="flex items-center justify-between gap-3">
+          <div>
+            <SectionLabel style={{ display: "block", marginBottom: 3 }}>View</SectionLabel>
+            <span className="text-text-3" style={{ fontSize: "11.5px" }}>
+              Technical adds model installs &amp; OAuth credentials.
+            </span>
           </div>
+          <Segmented
+            value={technical ? "technical" : "simple"}
+            onChange={(v) => setTechnical(v === "technical")}
+            options={[
+              ["simple", "Simple"],
+              ["technical", "Technical"],
+            ]}
+          />
+        </section>
 
-          <div className="max-h-[70vh] space-y-7 overflow-y-auto px-6 py-5">
-            {settings && (
-              <div className="rounded-[12px] bg-cream px-3.5 py-2.5 text-xs text-ink-2">
-                This machine: {settings.hw.cpu_cores} cores · {settings.hw.ram_gb} GB RAM
-                {settings.hw.gpu_name
-                  ? ` · ${settings.hw.gpu_name} (${Math.round((settings.hw.vram_mb ?? 0) / 1024)} GB VRAM)`
-                  : " · no NVIDIA GPU"}
-                {" — recommended tier: "}
-                <span className="font-semibold capitalize text-ink">
-                  {settings.hw.recommended_tier}
-                </span>
-              </div>
+        {/* Machine info */}
+        {settings && (
+          <div
+            className="bg-bg text-text-2"
+            style={{ borderRadius: 12, padding: "10px 14px", fontSize: 12 }}
+          >
+            This machine: {settings.hw.cpu_cores} cores · {settings.hw.ram_gb} GB RAM — recommended tier:{" "}
+            <b className="capitalize text-text">{settings.hw.recommended_tier}</b>
+            {technical && settings.hw.gpu_name && (
+              <span>
+                {" "}
+                · GPU: {settings.hw.gpu_name} ({Math.round((settings.hw.vram_mb ?? 0) / 1024)} GB VRAM)
+              </span>
             )}
+            {technical && !settings.hw.gpu_name && <span> · no NVIDIA GPU</span>}
+          </div>
+        )}
 
-            <section className="space-y-2">
-              <SectionLabel>Microphone</SectionLabel>
-              <select
-                value={micId}
-                onChange={(e) => {
-                  setMicId(e.target.value);
-                  void api.setAppSetting("capture.mic_device_id", e.target.value);
-                }}
-                className={`${FIELD} w-full max-w-80`}
-              >
-                <option value="">System default</option>
-                {mics.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                    {m.is_default ? " (default)" : ""}
-                  </option>
-                ))}
-              </select>
-            </section>
+        {/* Appearance */}
+        <section className="flex items-center justify-between gap-3">
+          <SectionLabel>Appearance</SectionLabel>
+          <Segmented
+            value={theme}
+            onChange={(v) => setTheme(v as "system" | "light" | "dark")}
+            options={[
+              ["system", "System"],
+              ["light", "Light"],
+              ["dark", "Dark"],
+            ]}
+          />
+        </section>
 
-            <section className="space-y-2">
+        {/* Microphone */}
+        <section className="space-y-2">
+          <SectionLabel>Microphone</SectionLabel>
+          <Select
+            style={{ maxWidth: "20rem" }}
+            value={micId}
+            onChange={(e) => {
+              setMicId(e.target.value);
+              void api.setAppSetting("capture.mic_device_id", e.target.value);
+            }}
+          >
+            <option value="">System default</option>
+            {mics.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+                {m.is_default ? " (default)" : ""}
+              </option>
+            ))}
+          </Select>
+        </section>
+
+        {/* Hardware tier (transcription) */}
+        <section className="space-y-3">
+          {technical ? (
+            <>
               <SectionLabel>Hardware tier</SectionLabel>
-              <div className="space-y-0.5">
+              <div className="flex flex-col">
                 {TIERS.map((t) => (
-                  <label
+                  <Checkbox
                     key={t.id}
-                    className="flex cursor-pointer items-start gap-2.5 rounded-lg px-2 py-1.5 hover:bg-peach-2"
-                  >
-                    <input
-                      type="radio"
-                      checked={tier === t.id}
-                      onChange={() => setTier(t.id)}
-                      className="mt-1 accent-coral"
-                    />
-                    <span className="text-sm">
-                      <span className="font-medium text-ink">{t.label}</span>
-                      <span className="ml-2 text-xs text-mute">{t.desc}</span>
-                    </span>
-                  </label>
+                    type="radio"
+                    name="tier"
+                    checked={tier === t.id}
+                    onChange={() => setTier(t.id)}
+                    label={t.label}
+                    description={t.desc}
+                    style={{ padding: "6px 2px" }}
+                  />
                 ))}
               </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <SectionLabel>Hardware tier</SectionLabel>
+              <Segmented
+                value={tier}
+                onChange={setTier}
+                options={TIERS.map(
+                  (t) => [t.id, t.id === "cloud" ? "Cloud" : t.label, t.desc] as SegOption,
+                )}
+              />
+            </div>
+          )}
 
-              <label className="flex items-center gap-2 text-sm text-ink-2">
-                <input
-                  type="checkbox"
-                  className="accent-coral"
-                  checked={useGpu}
-                  onChange={(e) => setUseGpu(e.target.checked)}
-                />
-                Use GPU for transcription when it is faster on this machine
-              </label>
+          {/* Cloud tier / Groq fallback → collect the Groq key here */}
+          {showGroqCard && (
+            <Card tone="muted" pad="sm" radius="md">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-text" style={{ fontSize: "12.5px", fontWeight: 600 }}>
+                  Groq
+                </span>
+                <Badge tone="warning" size="sm">
+                  cloud
+                </Badge>
+                <Badge tone={groqHasKey ? "success" : "warning"} size="sm">
+                  {groqHasKey ? "key ✓" : "needs key"}
+                </Badge>
+              </div>
+              <Input
+                type="password"
+                style={MONO_KEY}
+                placeholder={settings?.has_groq_key ? "Groq API key saved — enter to replace" : "gsk_…"}
+                value={groqKey}
+                onChange={(e) => setGroqKey(e.target.value)}
+              />
+              <p className="text-text-3" style={{ margin: "8px 0 0", fontSize: 11, lineHeight: 1.5 }}>
+                Cloud transcription uploads meeting audio to Groq — it{" "}
+                <span style={LEAVES_PILL}>LEAVES</span> this machine. Who-said-what (diarization) still
+                runs locally. Applied when you press Save.
+              </p>
+            </Card>
+          )}
+
+          {tier !== "cloud" && (
+            <>
+              <Checkbox
+                checked={useGpu}
+                onChange={(e) => setUseGpu(e.target.checked)}
+                label="Use GPU for transcription when it is faster on this machine"
+              />
               {useGpu && settings?.gpu_bench && (
-                <p className="pl-6 text-xs text-mute">
+                <p className="pl-7 text-text-3" style={{ fontSize: 11, lineHeight: 1.5 }}>
                   {settings.gpu_bench.verdict === "gpu"
                     ? `Speed test: GPU ${settings.gpu_bench.gpu_secs?.toFixed(0)} s vs CPU ${settings.gpu_bench.cpu_secs?.toFixed(0)} s — transcribing on the GPU.`
                     : settings.gpu_bench.gpu_secs != null && settings.gpu_bench.cpu_secs != null
@@ -351,506 +557,530 @@ export default function SettingsModal({
                 </p>
               )}
               {useGpu && !settings?.gpu_bench && (
-                <p className="pl-6 text-xs text-mute">
+                <p className="pl-7 text-text-3" style={{ fontSize: 11, lineHeight: 1.5 }}>
                   A one-time speed test runs at the start of the next transcription.
                 </p>
               )}
-            </section>
+            </>
+          )}
 
-            <section className="space-y-2">
-              <SectionLabel>Model</SectionLabel>
-              <select
-                value={modelId}
-                onChange={(e) => setModelId(e.target.value)}
-                className={`${FIELD} w-full max-w-80`}
-              >
-                <option value="">Auto (per tier)</option>
-                {asrModels.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.display}
-                  </option>
-                ))}
-              </select>
+          <Checkbox
+            checked={autoTranscribe}
+            onChange={(e) => setAutoTranscribe(e.target.checked)}
+            label="Transcribe automatically when a recording stops"
+          />
 
-              <label className="flex items-center gap-2 text-sm text-ink-2">
-                <input
-                  type="checkbox"
-                  className="accent-coral"
-                  checked={maxQuality}
-                  onChange={(e) => setMaxQuality(e.target.checked)}
-                />
-                Maximum quality (full large-v3 — slower, ~1 GB download)
-              </label>
-              <label className="flex items-center gap-2 text-sm text-ink-2">
-                <input
-                  type="checkbox"
-                  className="accent-coral"
-                  checked={autoTranscribe}
-                  onChange={(e) => setAutoTranscribe(e.target.checked)}
-                />
-                Transcribe automatically when a recording stops
-              </label>
+          {technical && (
+            <Checkbox
+              checked={useGroq}
+              onChange={(e) => setUseGroq(e.target.checked)}
+              label="Use Groq for transcription (cloud fallback)"
+              description="Uploads meeting audio to Groq for transcription; diarization stays local. Bring your own key — free tier available."
+            />
+          )}
+        </section>
 
-              <div className="rounded-[12px] border border-line bg-peach-2 p-3 text-[13px] text-clay">
-                <label className="flex items-center gap-2 font-semibold">
-                  <input
-                    type="checkbox"
-                    className="accent-coral"
-                    checked={useGroq}
-                    onChange={(e) => setUseGroq(e.target.checked)}
-                  />
-                  Use Groq for transcription (cloud fallback)
-                </label>
-                <p className="mt-1 text-xs opacity-80">
-                  When enabled, meeting audio is uploaded to Groq for transcription. Who-said-what
-                  (diarization) still runs locally. Bring your own key — free tier available.
-                </p>
-                <input
-                  type="password"
-                  placeholder={
-                    settings?.has_groq_key ? "Groq API key saved — enter to replace" : "gsk_…"
-                  }
-                  value={groqKey}
-                  onChange={(e) => setGroqKey(e.target.value)}
-                  className={`${FIELD} mt-2 w-full`}
-                />
-              </div>
-            </section>
+        {/* Transcription model (Technical) */}
+        {technical && (
+          <section className="space-y-3">
+            <SectionLabel>Transcription model</SectionLabel>
+            <Select
+              style={{ maxWidth: "20rem" }}
+              value={modelId}
+              onChange={(e) => setModelId(e.target.value)}
+            >
+              <option value="">Auto (per tier)</option>
+              {asrModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.display}
+                </option>
+              ))}
+            </Select>
+            <Checkbox
+              checked={maxQuality}
+              onChange={(e) => setMaxQuality(e.target.checked)}
+              label="Maximum quality (full large-v3 — slower, ~1 GB download)"
+            />
+          </section>
+        )}
 
-            <section className="space-y-2">
-              <SectionLabel>Models &amp; engines on disk</SectionLabel>
-              <div className="rounded-[14px] border border-line bg-surface px-4 py-1">
-                {[...asrModels, ...otherModels].map((m) => (
+        {/* Models on disk (Technical) */}
+        {technical && (
+          <section className="space-y-2">
+            <SectionLabel>Models</SectionLabel>
+            <div>
+              {[...asrModels, ...otherModels].map((m) => {
+                const prog =
+                  downloading === m.id && modelProgress && modelProgress.id === m.id && modelProgress.total > 0
+                    ? modelProgress
+                    : null;
+                const pct = prog ? Math.round((prog.downloaded / prog.total) * 100) : 0;
+                return (
                   <div
                     key={m.id}
-                    className="flex items-center justify-between border-b border-line-2 py-2 text-xs last:border-b-0"
+                    className="flex items-center justify-between gap-3 border-t border-line-2 py-2"
                   >
-                    <span className="truncate text-ink-2">{m.display}</span>
-                    <span className="ml-2 flex shrink-0 items-center gap-2">
-                      <span className="font-mono text-[11px] text-mute">{gb(m.bytes)}</span>
+                    <div className="min-w-0">
+                      <div
+                        className="truncate text-text"
+                        style={{ fontFamily: "var(--font-mono)", fontSize: "12.5px" }}
+                      >
+                        {m.display}
+                      </div>
+                      <div className="text-text-3" style={{ fontSize: 11 }}>
+                        {gb(m.bytes)}
+                      </div>
+                    </div>
+                    <span className="flex shrink-0 items-center gap-2">
                       {m.installed ? (
-                        <span className="font-medium text-spk-teal">installed</span>
+                        <Badge tone="success" dot>
+                          installed
+                        </Badge>
                       ) : downloading === m.id ? (
-                        modelProgress && modelProgress.id === m.id && modelProgress.total > 0 ? (
+                        prog ? (
                           <span className="flex items-center gap-2">
-                            <span className="h-1.5 w-24 overflow-hidden rounded-full bg-line">
-                              <span
-                                className="block h-full rounded-full bg-coral"
-                                style={{
-                                  width: `${Math.round((modelProgress.downloaded / modelProgress.total) * 100)}%`,
-                                }}
-                              />
-                            </span>
-                            <span className="font-mono text-[11px] text-mute">
-                              {Math.round((modelProgress.downloaded / modelProgress.total) * 100)}%
+                            <ProgressBar value={pct} style={{ width: 96 }} />
+                            <span
+                              className="text-text-3"
+                              style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}
+                            >
+                              {pct}%
                             </span>
                           </span>
                         ) : (
-                          <span className="font-mono text-[11px] text-mute">downloading…</span>
+                          <span
+                            className="text-text-3"
+                            style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}
+                          >
+                            downloading…
+                          </span>
                         )
                       ) : (
-                        <Btn variant="primary" size="sm" onClick={() => void download(m.id)}>
-                          Download
-                        </Btn>
+                        <Button variant="outline" size="sm" onClick={() => void download(m.id)}>
+                          Install
+                        </Button>
                       )}
                     </span>
                   </div>
-                ))}
-              </div>
-            </section>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
-            <section className="space-y-2">
-              <SectionLabel>AI provider (for Enhance &amp; Ask)</SectionLabel>
-              <div className="flex flex-wrap gap-2">
-                {llm?.providers.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => pickProvider(p.id)}
-                    className={`inline-flex cursor-pointer items-center rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
-                      llmProvider === p.id
-                        ? "border-coral bg-peach text-clay"
-                        : "border-line bg-surface text-ink-2 hover:bg-peach-2"
-                    }`}
-                  >
+        {/* AI provider */}
+        <section className="space-y-2">
+          <SectionLabel>AI provider (for Enhance &amp; Ask)</SectionLabel>
+          <p className="text-text-3" style={{ fontSize: 11, lineHeight: 1.5 }}>
+            Ollama runs entirely on this machine. OpenAI, Anthropic, and NVIDIA NIM send your notes +
+            transcript to their APIs when you use Enhance or Ask.
+          </p>
+          {llm && llm.providers.length > 0 && (
+            <Segmented
+              full
+              value={llmProvider}
+              onChange={pickProvider}
+              options={llm.providers.map((p) => [p.id, p.id] as SegOption)}
+            />
+          )}
+          {(() => {
+            const p = llm?.providers.find((x) => x.id === llmProvider);
+            if (!p) return null;
+            const hasKey = p.has_key || !!llmKey;
+            return (
+              <Card tone="muted" pad="sm" radius="md">
+                <div className="flex items-center gap-2" style={{ marginBottom: p.is_local ? 0 : 8 }}>
+                  <span className="text-text" style={{ fontSize: "12.5px", fontWeight: 600 }}>
                     {p.id}
-                    <span
-                      className={`ml-1.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                        p.is_local
-                          ? "bg-[color-mix(in_srgb,var(--color-spk-teal)_15%,transparent)] text-spk-teal"
-                          : "bg-[color-mix(in_srgb,var(--color-spk-amber)_15%,transparent)] text-spk-amber"
-                      }`}
-                    >
-                      {p.is_local ? "local" : "cloud"}
-                    </span>
-                    {p.has_key && <span className="ml-1.5 text-[10px] text-mute">key ✓</span>}
-                  </button>
-                ))}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  placeholder={`model (default: ${
-                    llm?.providers.find((p) => p.id === llmProvider)?.default_model ?? ""
-                  })`}
-                  value={llmModel}
-                  onChange={(e) => setLlmModel(e.target.value)}
-                  className={FIELD}
-                />
-                <input
-                  placeholder={
-                    llmProvider === "ollama"
-                      ? "base URL (default: localhost:11434)"
-                      : "base URL (optional)"
-                  }
-                  value={llmBaseUrl}
-                  onChange={(e) => setLlmBaseUrl(e.target.value)}
-                  className={FIELD}
-                />
-                {llmProvider !== "ollama" && (
-                  <input
-                    type="password"
-                    placeholder={
-                      llm?.providers.find((p) => p.id === llmProvider)?.has_key
-                        ? "API key saved — enter to replace"
-                        : "API key"
-                    }
-                    value={llmKey}
-                    onChange={(e) => setLlmKey(e.target.value)}
-                    className={`${FIELD} col-span-2`}
-                  />
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <Btn variant="primary" size="sm" onClick={() => void saveLlm()} disabled={llmBusy}>
-                  Save provider
-                </Btn>
-                <Btn variant="outline" size="sm" onClick={() => void testLlm()} disabled={llmBusy}>
-                  Test connection
-                </Btn>
-                {llmTest && <span className="text-xs text-ink-2">{llmTest}</span>}
-              </div>
-              <p className="text-[11px] text-mute">
-                Ollama runs entirely on this machine. OpenAI, Anthropic, and NVIDIA NIM send your
-                notes + transcript to their APIs when you use Enhance or Ask.
-              </p>
-            </section>
-
-            <section className="space-y-2">
-              <SectionLabel>Calendars</SectionLabel>
-              <p className="text-[11px] text-mute">
-                Bring your own OAuth app: a Google Cloud "Desktop app" client (ID + secret) and/or
-                an Azure app registration with a public client + loopback redirect. Tokens are
-                stored in the Windows keychain. See the README for a step-by-step.
-              </p>
-              <div className="space-y-2 rounded-[14px] border border-line bg-surface p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-[13px] font-semibold text-ink">Google Calendar</span>
-                  {cal?.google_connected ? (
-                    <span className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-spk-teal">connected</span>
-                      <Btn
-                        variant="outline"
-                        size="sm"
-                        className="hover:text-rec"
-                        disabled={calBusy !== null}
-                        onClick={() => void disconnectCal("google")}
-                      >
-                        disconnect
-                      </Btn>
-                    </span>
-                  ) : (
-                    <Btn
-                      variant="primary"
-                      size="sm"
-                      disabled={calBusy !== null || !googleId}
-                      onClick={() => void connectCal("google")}
-                    >
-                      {calBusy === "google" ? "waiting for browser…" : "Connect"}
-                    </Btn>
+                  </span>
+                  <Badge tone={p.is_local ? "success" : "warning"} size="sm">
+                    {p.is_local ? "local" : "cloud"}
+                  </Badge>
+                  {!p.is_local && (
+                    <Badge tone={hasKey ? "success" : "warning"} size="sm">
+                      {hasKey ? "key ✓" : "needs key"}
+                    </Badge>
                   )}
                 </div>
-                <input
+                {p.is_local ? (
+                  <span className="text-text-2" style={{ fontSize: 12 }}>
+                    Runs entirely on this machine — no API key needed.
+                  </span>
+                ) : (
+                  <Input
+                    type="password"
+                    style={MONO_KEY}
+                    placeholder={p.has_key ? "API key saved — enter to replace" : `Paste your ${p.id} API key`}
+                    value={llmKey}
+                    onChange={(e) => setLlmKey(e.target.value)}
+                  />
+                )}
+                {technical && (
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <Input
+                      placeholder={`model (default: ${p.default_model ?? ""})`}
+                      value={llmModel}
+                      onChange={(e) => setLlmModel(e.target.value)}
+                    />
+                    <Input
+                      placeholder={
+                        llmProvider === "ollama" ? "base URL (default: localhost:11434)" : "base URL (optional)"
+                      }
+                      value={llmBaseUrl}
+                      onChange={(e) => setLlmBaseUrl(e.target.value)}
+                    />
+                  </div>
+                )}
+                <div className="mt-3 flex items-center gap-2">
+                  <Button variant="primary" size="sm" onClick={() => void saveLlm()} disabled={llmBusy}>
+                    {hasKey && !p.is_local ? "Update" : "Save provider"}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => void testLlm()} disabled={llmBusy}>
+                    Test connection
+                  </Button>
+                  {llmTest && <span className="text-text-2" style={{ fontSize: 12 }}>{llmTest}</span>}
+                </div>
+              </Card>
+            );
+          })()}
+        </section>
+
+        {/* Calendars */}
+        <section className="space-y-2">
+          <SectionLabel>Calendars</SectionLabel>
+          <p className="text-text-3" style={{ fontSize: 11, lineHeight: 1.5 }}>
+            Bring your own OAuth app: a Google Cloud "Desktop app" client (ID + secret) and/or an Azure
+            app registration with a public client + loopback redirect. Tokens are stored in the Windows
+            keychain. See the README for a step-by-step.
+          </p>
+          <Card tone="surface" pad="md">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-text" style={{ fontSize: 13 }}>
+                Google Calendar
+              </span>
+              {cal?.google_connected ? (
+                <span className="flex items-center gap-2">
+                  <Badge tone="success" dot>
+                    connected
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="hover:text-rec"
+                    disabled={calBusy !== null}
+                    onClick={() => void disconnectCal("google")}
+                  >
+                    disconnect
+                  </Button>
+                </span>
+              ) : (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={calBusy !== null || !googleId}
+                  onClick={() => void connectCal("google")}
+                >
+                  {calBusy === "google" ? "waiting for browser…" : "Connect"}
+                </Button>
+              )}
+            </div>
+            {technical && (
+              <div className="mt-2.5 grid grid-cols-2 gap-2">
+                <Input
+                  style={MONO_KEY}
                   placeholder="Client ID (….apps.googleusercontent.com)"
                   value={googleId}
                   onChange={(e) => setGoogleId(e.target.value)}
-                  className={`${FIELD} w-full`}
                 />
-                <input
+                <Input
                   type="password"
-                  placeholder={
-                    cal?.google_has_secret
-                      ? "Client secret saved — enter to replace"
-                      : "Client secret"
-                  }
+                  style={MONO_KEY}
+                  placeholder={cal?.google_has_secret ? "Client secret saved — enter to replace" : "Client secret"}
                   value={googleSecret}
                   onChange={(e) => setGoogleSecret(e.target.value)}
-                  className={`${FIELD} w-full`}
                 />
               </div>
-              <div className="space-y-2 rounded-[14px] border border-line bg-surface p-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-[13px] font-semibold text-ink">
-                    Microsoft 365 / Outlook
-                  </span>
-                  {cal?.ms_connected ? (
-                    <span className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-spk-teal">connected</span>
-                      <Btn
-                        variant="outline"
-                        size="sm"
-                        className="hover:text-rec"
-                        disabled={calBusy !== null}
-                        onClick={() => void disconnectCal("msgraph")}
-                      >
-                        disconnect
-                      </Btn>
-                    </span>
-                  ) : (
-                    <Btn
-                      variant="primary"
-                      size="sm"
-                      disabled={calBusy !== null || !msId}
-                      onClick={() => void connectCal("msgraph")}
-                    >
-                      {calBusy === "msgraph" ? "waiting for browser…" : "Connect"}
-                    </Btn>
-                  )}
-                </div>
-                <input
+            )}
+          </Card>
+          <Card tone="surface" pad="md">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-text" style={{ fontSize: 13 }}>
+                Microsoft 365 / Outlook
+              </span>
+              {cal?.ms_connected ? (
+                <span className="flex items-center gap-2">
+                  <Badge tone="success" dot>
+                    connected
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="hover:text-rec"
+                    disabled={calBusy !== null}
+                    onClick={() => void disconnectCal("msgraph")}
+                  >
+                    disconnect
+                  </Button>
+                </span>
+              ) : (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={calBusy !== null || !msId}
+                  onClick={() => void connectCal("msgraph")}
+                >
+                  {calBusy === "msgraph" ? "waiting for browser…" : "Connect"}
+                </Button>
+              )}
+            </div>
+            {technical && (
+              <div className="mt-2.5">
+                <Input
+                  style={MONO_KEY}
                   placeholder="Application (client) ID — no secret needed"
                   value={msId}
                   onChange={(e) => setMsId(e.target.value)}
-                  className={`${FIELD} w-full`}
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <Btn variant="primary" size="sm" onClick={() => void saveCal()}>
-                  Save calendar config
-                </Btn>
-                {calMsg && <span className="text-xs text-ink-2">{calMsg}</span>}
-              </div>
-            </section>
+            )}
+          </Card>
+          {technical && (
+            <div className="flex items-center gap-2">
+              <Button variant="primary" size="sm" onClick={() => void saveCal()}>
+                Save calendar config
+              </Button>
+              {calMsg && <span className="text-text-2" style={{ fontSize: 12 }}>{calMsg}</span>}
+            </div>
+          )}
+        </section>
 
-            <section className="space-y-2">
-              <div className="flex items-center justify-between">
-                <SectionLabel>Note templates</SectionLabel>
-                <Btn
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    setEditingTpl({
-                      id: "",
-                      name: "New template",
-                      system_prompt: "You are an expert meeting-notes editor. Never invent facts.",
-                      structure_hint: "## Summary\n## Action items",
-                      built_in: false,
-                    })
-                  }
+        {/* Note templates */}
+        <section className="space-y-2">
+          <div className="flex items-center justify-between">
+            <SectionLabel>Note templates</SectionLabel>
+            <Button
+              variant="outline"
+              size="sm"
+              startIcon={<Plus size={14} strokeWidth={1.75} />}
+              onClick={() =>
+                setEditingTpl({
+                  id: "",
+                  name: "New template",
+                  system_prompt: "You are an expert meeting-notes editor. Never invent facts.",
+                  structure_hint: "## Summary\n## Action items",
+                  built_in: false,
+                })
+              }
+            >
+              New
+            </Button>
+          </div>
+          {editingTpl ? (
+            <Card tone="surface" pad="md">
+              <div className="space-y-2">
+                <Input
+                  value={editingTpl.name}
+                  onChange={(e) => setEditingTpl({ ...editingTpl, name: e.target.value })}
+                  placeholder="Template name"
+                />
+                <textarea
+                  value={editingTpl.system_prompt}
+                  onChange={(e) => setEditingTpl({ ...editingTpl, system_prompt: e.target.value })}
+                  rows={3}
+                  style={TEXTAREA}
+                  placeholder="System prompt"
+                />
+                <textarea
+                  value={editingTpl.structure_hint}
+                  onChange={(e) => setEditingTpl({ ...editingTpl, structure_hint: e.target.value })}
+                  rows={3}
+                  style={{ ...TEXTAREA, fontFamily: "var(--font-mono)" }}
+                  placeholder="Structure hint (markdown headings)"
+                />
+                <div className="flex gap-2">
+                  <Button variant="primary" size="sm" onClick={() => void saveTpl()}>
+                    Save template
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setEditingTpl(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <div>
+              {templates.map((t) => (
+                <div
+                  key={t.id}
+                  className="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-surface-3"
+                  style={{ fontSize: "13px" }}
                 >
-                  + New
-                </Btn>
-              </div>
-              {editingTpl ? (
-                <div className="space-y-2 rounded-[14px] border border-line bg-surface p-4">
-                  <input
-                    value={editingTpl.name}
-                    onChange={(e) => setEditingTpl({ ...editingTpl, name: e.target.value })}
-                    className={`${FIELD} w-full`}
-                    placeholder="Template name"
-                  />
-                  <textarea
-                    value={editingTpl.system_prompt}
-                    onChange={(e) =>
-                      setEditingTpl({ ...editingTpl, system_prompt: e.target.value })
-                    }
-                    rows={3}
-                    className={PROMPT_BOX}
-                    placeholder="System prompt"
-                  />
-                  <textarea
-                    value={editingTpl.structure_hint}
-                    onChange={(e) =>
-                      setEditingTpl({ ...editingTpl, structure_hint: e.target.value })
-                    }
-                    rows={3}
-                    className={`${PROMPT_BOX} font-mono`}
-                    placeholder="Structure hint (markdown headings)"
-                  />
-                  <div className="flex gap-2">
-                    <Btn variant="primary" size="sm" onClick={() => void saveTpl()}>
-                      Save template
-                    </Btn>
-                    <Btn variant="outline" size="sm" onClick={() => setEditingTpl(null)}>
-                      Cancel
-                    </Btn>
-                  </div>
-                </div>
-              ) : (
-                <div>
-                  {templates.map((t) => (
-                    <div
-                      key={t.id}
-                      className="flex items-center justify-between rounded-lg px-2 py-1.5 text-[13px] hover:bg-peach-2"
+                  <span className="text-text">{t.name}</span>
+                  <span className="flex items-center gap-2">
+                    {t.built_in && (
+                      <Badge tone="neutral" size="sm">
+                        built-in
+                      </Badge>
+                    )}
+                    <Button variant="ghost" size="sm" onClick={() => setEditingTpl(t)}>
+                      edit
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="hover:text-rec"
+                      onClick={() => void removeTpl(t.id)}
                     >
-                      <span className="text-ink">{t.name}</span>
-                      <span className="flex items-center gap-2">
-                        {t.built_in && <span className="text-[11px] text-mute">built-in</span>}
-                        <Btn variant="ghost" size="sm" onClick={() => setEditingTpl(t)}>
-                          edit
-                        </Btn>
-                        <Btn
-                          variant="outline"
-                          size="sm"
-                          className="hover:text-rec"
-                          onClick={() => void removeTpl(t.id)}
-                        >
-                          delete
-                        </Btn>
-                      </span>
-                    </div>
-                  ))}
+                      delete
+                    </Button>
+                  </span>
                 </div>
-              )}
-            </section>
+              ))}
+            </div>
+          )}
+        </section>
 
-            <section className="space-y-2">
-              <SectionLabel>Chat with your notes (MCP)</SectionLabel>
-              <div className="rounded-[16px] bg-ink p-5 text-white">
-                <p className="mb-3 text-[13px] leading-relaxed text-white/70">
-                  Fly on the Wall ships a local MCP server. Add this to Claude Desktop's{" "}
-                  <code className="rounded bg-white/10 px-1 py-0.5 font-mono text-[11px] text-white">
-                    claude_desktop_config.json
-                  </code>{" "}
-                  (or any MCP client) to search and read your notes and transcripts — everything
-                  stays on this machine.
-                </p>
-                {mcpJson && (
-                  <div className="relative">
-                    <pre className="overflow-x-auto whitespace-pre rounded-[10px] border border-white/15 bg-white/10 p-3 font-mono text-[12px] text-white">
-                      {mcpJson}
-                    </pre>
-                    <Btn
+        {/* MCP */}
+        <section className="space-y-2">
+          <SectionLabel>Chat with your notes (MCP)</SectionLabel>
+          <Card tone="invert" pad="lg">
+            <p style={{ margin: "0 0 12px", fontSize: 13, lineHeight: 1.5, color: "rgba(255,255,255,.72)" }}>
+              Fly on the Wall ships a local MCP server. Add this to your MCP client (Claude Desktop's{" "}
+              <code
+                style={{
+                  borderRadius: 4,
+                  background: "rgba(255,255,255,.1)",
+                  padding: "1px 4px",
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                }}
+              >
+                claude_desktop_config.json
+              </code>
+              , or any client) to search and read your notes and transcripts — everything stays on this
+              machine.
+            </p>
+            {mcpJson && (
+              <div style={{ position: "relative" }}>
+                <pre
+                  style={{
+                    margin: 0,
+                    overflowX: "auto",
+                    whiteSpace: "pre",
+                    borderRadius: 10,
+                    border: "1px solid rgba(255,255,255,.15)",
+                    background: "rgba(255,255,255,.08)",
+                    padding: 12,
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 12,
+                    color: "#fff",
+                  }}
+                >
+                  {mcpJson}
+                </pre>
+                <span style={{ position: "absolute", right: 8, top: 8 }}>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    startIcon={
+                      mcpCopied ? <Check size={14} strokeWidth={1.75} /> : <Copy size={14} strokeWidth={1.75} />
+                    }
+                    onClick={() => {
+                      void navigator.clipboard.writeText(mcpJson).then(() => {
+                        setMcpCopied(true);
+                        window.setTimeout(() => setMcpCopied(false), 1500);
+                      });
+                    }}
+                  >
+                    {mcpCopied ? "Copied" : "Copy"}
+                  </Button>
+                </span>
+              </div>
+            )}
+          </Card>
+        </section>
+
+        {/* App updates */}
+        <section className="space-y-2">
+          <SectionLabel>App updates</SectionLabel>
+          {updater.supported ? (
+            <Card tone="surface" pad="md">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-text-2" style={{ fontSize: 13 }}>
+                    Current version <span className="font-semibold text-text">v{appVersion ?? "…"}</span>
+                  </span>
+                  {(updater.phase === "idle" || updater.phase === "upToDate" || updater.phase === "error") && (
+                    <Button variant="outline" size="sm" onClick={updater.check}>
+                      Check for updates
+                    </Button>
+                  )}
+                  {updater.phase === "checking" && (
+                    <Button variant="outline" size="sm" disabled>
+                      Checking…
+                    </Button>
+                  )}
+                  {updater.phase === "available" && (
+                    <Button
                       variant="primary"
                       size="sm"
-                      className="absolute right-2 top-2"
-                      onClick={() => {
-                        void navigator.clipboard.writeText(mcpJson).then(() => {
-                          setMcpCopied(true);
-                          window.setTimeout(() => setMcpCopied(false), 1500);
-                        });
-                      }}
+                      disabled={recordingActive}
+                      onClick={updater.downloadAndInstall}
                     >
-                      {mcpCopied ? "Copied ✓" : "Copy"}
-                    </Btn>
-                  </div>
+                      Download &amp; install v{updater.version}
+                    </Button>
+                  )}
+                  {updater.phase === "downloading" && (
+                    <span className="flex items-center gap-2">
+                      <ProgressBar
+                        value={updater.progress == null ? null : Math.round(updater.progress * 100)}
+                        style={{ width: 96 }}
+                      />
+                      <span className="text-text-3" style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>
+                        {updater.progress == null ? "downloading…" : `${Math.round(updater.progress * 100)}%`}
+                      </span>
+                    </span>
+                  )}
+                  {updater.phase === "ready" && (
+                    <Button variant="primary" size="sm" disabled={recordingActive} onClick={updater.restart}>
+                      Restart now
+                    </Button>
+                  )}
+                  {updater.phase === "installing" && (
+                    <span className="text-text-2" style={{ fontSize: 12 }}>
+                      Installing — Fly on the Wall will restart…
+                    </span>
+                  )}
+                </div>
+                {updater.phase === "upToDate" && (
+                  <p className="text-success-text" style={{ fontSize: 12, fontWeight: 500 }}>
+                    You're on the latest version ✓
+                  </p>
+                )}
+                {updater.phase === "error" && (
+                  <p className="text-error-text" style={{ fontSize: 12 }}>
+                    ✗ {updater.error}
+                  </p>
+                )}
+                {updater.phase === "ready" && !recordingActive && (
+                  <p className="text-text-2" style={{ fontSize: 12 }}>
+                    Update downloaded — restart when you're ready.
+                  </p>
+                )}
+                {recordingActive && (updater.phase === "available" || updater.phase === "ready") && (
+                  <p className="text-text-2" style={{ fontSize: 12 }}>
+                    Recording in progress — the update waits until you're done.
+                  </p>
                 )}
               </div>
-            </section>
-
-            <section className="space-y-2">
-              <SectionLabel>App updates</SectionLabel>
-              {updater.supported ? (
-                <div className="space-y-2 rounded-[14px] border border-line bg-surface p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-[13px] text-ink-2">
-                      Current version{" "}
-                      <span className="font-semibold text-ink">v{appVersion ?? "…"}</span>
-                    </span>
-                    {(updater.phase === "idle" ||
-                      updater.phase === "upToDate" ||
-                      updater.phase === "error") && (
-                      <Btn variant="outline" size="sm" onClick={updater.check}>
-                        Check for updates
-                      </Btn>
-                    )}
-                    {updater.phase === "checking" && (
-                      <Btn variant="outline" size="sm" disabled>
-                        Checking…
-                      </Btn>
-                    )}
-                    {updater.phase === "available" && (
-                      <Btn
-                        variant="primary"
-                        size="sm"
-                        disabled={recordingActive}
-                        onClick={updater.downloadAndInstall}
-                      >
-                        Download &amp; install v{updater.version}
-                      </Btn>
-                    )}
-                    {updater.phase === "downloading" && (
-                      <span className="flex items-center gap-2">
-                        <span className="h-1.5 w-24 overflow-hidden rounded-full bg-line">
-                          <span
-                            className={`block h-full rounded-full bg-coral ${
-                              updater.progress == null ? "w-1/3 animate-pulse" : ""
-                            }`}
-                            style={
-                              updater.progress == null
-                                ? undefined
-                                : { width: `${Math.round(updater.progress * 100)}%` }
-                            }
-                          />
-                        </span>
-                        <span className="font-mono text-[11px] text-mute">
-                          {updater.progress == null
-                            ? "downloading…"
-                            : `${Math.round(updater.progress * 100)}%`}
-                        </span>
-                      </span>
-                    )}
-                    {updater.phase === "ready" && (
-                      <Btn
-                        variant="primary"
-                        size="sm"
-                        disabled={recordingActive}
-                        onClick={updater.restart}
-                      >
-                        Restart now
-                      </Btn>
-                    )}
-                    {updater.phase === "installing" && (
-                      <span className="text-xs text-ink-2">Installing — Fly on the Wall will restart…</span>
-                    )}
-                  </div>
-                  {updater.phase === "upToDate" && (
-                    <p className="text-xs font-medium text-spk-teal">
-                      You're on the latest version ✓
-                    </p>
-                  )}
-                  {updater.phase === "error" && (
-                    <p className="text-xs text-clay">✗ {updater.error}</p>
-                  )}
-                  {updater.phase === "ready" && !recordingActive && (
-                    <p className="text-xs text-ink-2">
-                      Update downloaded — restart when you're ready.
-                    </p>
-                  )}
-                  {recordingActive &&
-                    (updater.phase === "available" || updater.phase === "ready") && (
-                      <p className="text-xs text-ink-2">
-                        Recording in progress — the update waits until you're done.
-                      </p>
-                    )}
-                </div>
-              ) : (
-                <p className="text-[11px] text-mute">
-                  Auto-update is Windows-only for now — new versions are published on the GitHub
-                  releases page.
-                </p>
-              )}
-            </section>
-          </div>
-
-          <div className="flex justify-end gap-2 border-t border-line px-6 py-4">
-            <Btn variant="outline" size="sm" onClick={onClose}>
-              Cancel
-            </Btn>
-            <Btn variant="primary" size="sm" disabled={saving} onClick={() => void save()}>
-              {saving ? "Saving…" : "Save"}
-            </Btn>
-          </div>
-        </div>
-      </ModalShell>
-    </div>
+            </Card>
+          ) : (
+            <p className="text-text-3" style={{ fontSize: 11, lineHeight: 1.5 }}>
+              Auto-update is Windows-only for now — new versions are published on the GitHub releases page.
+            </p>
+          )}
+        </section>
+      </div>
+    </Modal>
   );
 }

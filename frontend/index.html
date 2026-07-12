@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Fly on the Wall</title>
+    <!-- Pre-paint theme: default to the OS, follow prefers-color-scheme.
+         Sets data-theme (and a matching canvas color) before React mounts so
+         there is no light/dark flash. The app's useTheme() takes over on mount. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("fotw-theme") || "system";
+          var dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+          var root = document.documentElement;
+          root.setAttribute("data-theme", dark ? "dark" : "light");
+          root.style.backgroundColor = dark ? "#0D0D12" : "#F2F2E8";
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
