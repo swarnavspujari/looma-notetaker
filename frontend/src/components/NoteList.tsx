@@ -1,6 +1,6 @@
 import type { NoteSummary, SearchHit } from "../types";
 import { Avatar, Badge, Button, SectionLabel } from "./ui";
-import { Mic, Plus, Search, Trash2, Upload } from "lucide-react";
+import { Mic, Plus, Search, Trash2 } from "lucide-react";
 
 interface Props {
   notes: NoteSummary[];
@@ -11,7 +11,6 @@ interface Props {
   onOpenNote: (id: string) => void;
   onNewNote: () => void;
   onDeleteNote: (id: string) => void;
-  onImport: () => void;
 }
 
 function relTime(iso: string): string {
@@ -65,7 +64,6 @@ export default function NoteList({
   onOpenNote,
   onNewNote,
   onDeleteNote,
-  onImport,
 }: Props) {
   const searching = searchQuery.trim().length > 0;
   const scopeLabel = searching ? "Results" : "Notes";
@@ -86,27 +84,16 @@ export default function NoteList({
             className="w-full rounded-[var(--radius-md)] border border-line bg-surface py-2 pr-3 pl-8 font-sans text-[13px] text-text outline-none placeholder:text-text-3 focus:border-primary"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onNewNote}
-            title="New note"
-            startIcon={<Plus size={14} strokeWidth={1.75} />}
-            className="flex-1"
-          >
-            New note
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onImport}
-            title="Import an audio/video file and transcribe it"
-            startIcon={<Upload size={14} strokeWidth={1.75} />}
-          >
-            Import
-          </Button>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onNewNote}
+          title="New note"
+          startIcon={<Plus size={14} strokeWidth={1.75} />}
+          className="w-full"
+        >
+          New note
+        </Button>
       </div>
 
       {/* Scope + count */}

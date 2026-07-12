@@ -49,6 +49,22 @@ pub fn relabel_speaker(
         .map_err(|e| e.to_string())
 }
 
+/// Persist an edit to a transcript line's text (returns the updated transcript).
+#[tauri::command]
+pub fn edit_transcript_segment(
+    state: State<'_, AppState>,
+    meeting_id: String,
+    segment_id: String,
+    text: String,
+) -> CmdResult<Transcript> {
+    state
+        .storage
+        .lock()
+        .unwrap()
+        .edit_segment_text(&meeting_id, &segment_id, &text)
+        .map_err(|e| e.to_string())
+}
+
 /// Current stage of a running pipeline (None = not running).
 #[tauri::command]
 pub fn pipeline_stage(state: State<'_, AppState>, meeting_id: String) -> Option<String> {

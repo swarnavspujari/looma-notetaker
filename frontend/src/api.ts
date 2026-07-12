@@ -80,6 +80,8 @@ export const api = {
   getTranscript: (meetingId: string) => invoke<Transcript | null>("get_transcript", { meetingId }),
   relabelSpeaker: (meetingId: string, speakerKey: string, label: string) =>
     invoke<Transcript>("relabel_speaker", { meetingId, speakerKey, label }),
+  editTranscriptSegment: (meetingId: string, segmentId: string, text: string) =>
+    invoke<Transcript>("edit_transcript_segment", { meetingId, segmentId, text }),
   pipelineStage: (meetingId: string) => invoke<string | null>("pipeline_stage", { meetingId }),
 
   // ASR settings & models

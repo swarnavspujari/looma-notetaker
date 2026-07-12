@@ -17,6 +17,8 @@ interface Props {
   highlightIds: string[];
   onTranscribe: () => void;
   onRelabel: (speakerKey: string, label: string) => void;
+  /** Persist an edited transcript line (called on blur when the text changed). */
+  onEditSegment: (segmentId: string, text: string) => void;
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -99,6 +101,7 @@ export default function TranscriptPanel({
   highlightIds,
   onTranscribe,
   onRelabel,
+  onEditSegment,
 }: Props) {
   const segRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -220,7 +223,11 @@ export default function TranscriptPanel({
                 suppressContentEditableWarning
                 spellCheck={false}
                 onFocus={(e) => (e.currentTarget.style.borderColor = "var(--primary)")}
-                onBlur={(e) => (e.currentTarget.style.borderColor = "var(--line)")}
+                onBlur={(e) => {
+                  e.currentTarget.style.borderColor = "var(--line)";
+                  const next = (e.currentTarget.textContent ?? "").trim();
+                  if (next && next !== seg.text) onEditSegment(seg.id, next);
+                }}
                 className="rounded-xl border px-3 py-2 text-[14px] leading-[1.55] outline-none"
                 style={{
                   borderColor: "var(--line)",

@@ -60,6 +60,27 @@ impl Storage {
         Ok(transcript)
     }
 
+    /// Edit a segment's text in place (stable ids never change); re-syncs FTS
+    /// and the on-disk markdown/JSON mirrors so an edit survives reload.
+    pub fn edit_segment_text(
+        &self,
+        meeting_id: &str,
+        segment_id: &str,
+        text: &str,
+    ) -> Result<Transcript> {
+        let mut transcript = self
+            .get_transcript(meeting_id)?
+            .ok_or_else(|| StorageError::NotFound(format!("transcript for {meeting_id}")))?;
+        let seg = transcript
+            .segments
+            .iter_mut()
+            .find(|s| s.id == segment_id)
+            .ok_or_else(|| StorageError::NotFound(format!("segment {segment_id}")))?;
+        seg.text = text.to_string();
+        self.save_transcript(&transcript)?;
+        Ok(transcript)
+    }
+
     fn sync_transcript_derived(&self, t: &Transcript) -> Result<()> {
         // FTS body: labeled lines, so a search for a speaker name hits too.
         let body: String = t

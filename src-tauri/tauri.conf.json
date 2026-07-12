@@ -4,7 +4,7 @@
   "version": "0.3.1",
   "identifier": "com.flyonthewall.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run prepare-sidecars && npm run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run build && npm run prepare-sidecars",
     "frontendDist": "../frontend/dist"
@@ -31,7 +31,11 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": []
+      }
     }
   },
   "bundle": {

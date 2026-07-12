@@ -62,6 +62,9 @@ export default function App() {
     note_id: null,
     elapsed_ms: 0,
   });
+  // Human label of the current screen capture ("Full screen" / "Window" /
+  // "Region"), shown in the recording bar's screen pill.
+  const [screenSource, setScreenSource] = useState<string | null>(null);
   const [autoTranscribe, setAutoTranscribe] = useState(true);
   const [templates, setTemplates] = useState<Template[]>([]);
   const [upcoming, setUpcoming] = useState<CalendarEvent[]>([]);
@@ -285,10 +288,22 @@ export default function App() {
     setTranscript(await api.relabelSpeaker(openMeeting.id, speakerKey, label));
   };
 
+  const editSegment = async (segmentId: string, text: string) => {
+    if (!openMeeting) return;
+    try {
+      setTranscript(await api.editTranscriptSegment(openMeeting.id, segmentId, text));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const startScreen = async (target: CaptureTarget) => {
     if (!openNote) return;
     try {
       setScreenStatus(await api.startScreenRecording(openNote.id, target));
+      setScreenSource(
+        target.kind === "full_screen" ? "Full screen" : target.kind === "window" ? "Window" : "Region",
+      );
     } catch (e) {
       setError(String(e));
     }
@@ -298,19 +313,8 @@ export default function App() {
     try {
       const updated = await api.stopScreenRecording();
       setScreenStatus({ active: false, note_id: null, elapsed_ms: 0 });
+      setScreenSource(null);
       if (openNote?.id === updated.id) setOpenNote(updated);
-    } catch (e) {
-      setError(String(e));
-    }
-  };
-
-  const importMedia = async () => {
-    try {
-      const result = await api.importMedia();
-      if (result) {
-        await refreshNotes();
-        await openNoteById(result.note_id);
-      }
     } catch (e) {
       setError(String(e));
     }
@@ -338,6 +342,8 @@ export default function App() {
       <RecordingBar
         status={recStatus}
         noteTitle={recordingNoteTitle}
+        screenActive={screenStatus.active}
+        screenSource={screenSource}
         onPause={() => void api.pauseRecording().then(setRecStatus).catch(console.error)}
         onResume={() => void api.resumeRecording().then(setRecStatus).catch(console.error)}
         onStop={() => void stopRecording()}
@@ -376,7 +382,6 @@ export default function App() {
           onOpenNote={(id) => void openNoteById(id)}
           onNewNote={() => void newNote()}
           onDeleteNote={(id) => void deleteNote(id)}
-          onImport={() => void importMedia()}
         />
         {openNote ? (
           <Editor
@@ -391,6 +396,7 @@ export default function App() {
             screenStatus={screenStatus}
             folders={folders}
             templates={templates}
+            dataDir={info?.data_dir ?? null}
             onNoteChanged={onNoteChanged}
             onMoveNote={(folderId) => void moveOpenNote(folderId)}
             onStartRecording={() => void startRecording()}
@@ -398,6 +404,7 @@ export default function App() {
             onStopScreen={() => void stopScreen()}
             onTranscribe={() => void transcribeNow()}
             onRelabel={(k, l) => void relabel(k, l)}
+            onEditSegment={(id, text) => void editSegment(id, text)}
           />
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center gap-5 bg-surface text-text-3">

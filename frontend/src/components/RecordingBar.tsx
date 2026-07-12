@@ -5,6 +5,10 @@ import { Button, RecordingIndicator } from "./ui";
 interface Props {
   status: RecordingStatus;
   noteTitle: string | null;
+  /** A screen capture is running alongside the audio recording. */
+  screenActive?: boolean;
+  /** Its source label ("Full screen" / "Window" / "Region"). */
+  screenSource?: string | null;
   onPause: () => void;
   onResume: () => void;
   onStop: () => void;
@@ -27,6 +31,8 @@ export function fmtElapsed(ms: number): string {
 export default function RecordingBar({
   status,
   noteTitle,
+  screenActive = false,
+  screenSource,
   onPause,
   onResume,
   onStop,
@@ -50,6 +56,15 @@ export default function RecordingBar({
           >
             {noteTitle}
           </button>
+        )}
+        {screenActive && (
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-2.5 py-[3px] text-[12px] font-semibold text-text-2">
+            <span
+              className="h-[7px] w-[7px] flex-none rounded-full bg-rec"
+              style={{ animation: "fly-pulse-dot 1.2s ease infinite" }}
+            />
+            Screen · {screenSource ?? "recording"}
+          </span>
         )}
         <div className="ml-auto flex items-center gap-2">
           {paused ? (

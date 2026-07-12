@@ -37,6 +37,11 @@ pub fn run() {
                 app.handle().plugin(tauri_plugin_process::init())?;
             }
             let app_state = state::AppState::init()?;
+            // Let the webview stream recordings from the data dir so the editor's
+            // audio player can embed & scrub them (asset protocol).
+            let _ = app
+                .asset_protocol_scope()
+                .allow_directory(&app_state.data_dir, true);
             app.manage(app_state);
             // Warm the hardware cache off the startup path: detection shells
             // out to nvidia-smi and must never sit in front of first paint.
@@ -91,6 +96,7 @@ pub fn run() {
             asr_commands::transcribe_meeting,
             asr_commands::get_transcript,
             asr_commands::relabel_speaker,
+            asr_commands::edit_transcript_segment,
             asr_commands::pipeline_stage,
             asr_commands::get_asr_settings,
             asr_commands::set_asr_settings,

@@ -168,10 +168,18 @@ function handle(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "get_meeting_for_note": return meeting(String(args.noteId));
     case "get_transcript": return transcript;
     case "relabel_speaker": return transcript;
+    case "edit_transcript_segment": {
+      const s = transcript.segments.find((x) => x.id === args.segmentId);
+      if (s) s.text = String(args.text ?? s.text);
+      return transcript;
+    }
     case "pipeline_stage": return null;
     case "search": return searchHits(String(args.query ?? ""));
     case "recording_status": return recordingStatus();
-    case "screen_status": return { active: false, note_id: null, elapsed_ms: 0 };
+    case "screen_status":
+      return typeof localStorage !== "undefined" && localStorage.getItem("fotwMockRecording") === "1"
+        ? { active: true, note_id: "n1", elapsed_ms: 132_000 }
+        : { active: false, note_id: null, elapsed_ms: 0 };
     case "get_asr_settings": return asrSettings;
     case "get_llm_settings": return llmSettings;
     case "get_calendar_settings": return calendarStatus;

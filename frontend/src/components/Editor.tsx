@@ -24,15 +24,18 @@ import {
   Mic,
   Monitor,
   Paperclip,
+  Pause,
   Play,
   Printer,
   Sparkles,
   Square,
   X,
 } from "lucide-react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { api } from "../api";
 import { fmtElapsed } from "./RecordingBar";
 import { Avatar, Button, SectionLabel } from "./ui";
+import NotesEditor from "./NotesEditor";
 import TranscriptPanel from "./TranscriptPanel";
 import LivePane from "./LivePane";
 import EnhancedDoc from "./EnhancedDoc";
@@ -50,6 +53,8 @@ interface Props {
   screenStatus: ScreenStatus;
   folders: Folder[];
   templates: Template[];
+  /** Absolute app data dir — lets the audio player stream local recordings. */
+  dataDir: string | null;
   onNoteChanged: (note: Note) => void;
   onMoveNote: (folderId: string | null) => void;
   onStartRecording: () => void;
@@ -57,11 +62,11 @@ interface Props {
   onStopScreen: () => void;
   onTranscribe: () => void;
   onRelabel: (speakerKey: string, label: string) => void;
+  onEditSegment: (segmentId: string, text: string) => void;
 }
 
 type View = "notes" | "transcript" | "enhanced";
 
-const URL_RE = /^https?:\/\/\S+$/;
 const VIDEO_RE = /\.(mp4|webm|mov|mkv|m4v)$/i;
 const isVideo = (a: Attachment) => (a.mime?.startsWith("video/") ?? false) || VIDEO_RE.test(a.file_name);
 
@@ -78,42 +83,106 @@ function fmtWhen(iso: string): string {
   return `${date} · ${time}`;
 }
 
-/* ---- Audio waveform player: round violet play button opens the recording in
-   the system player (matches the build's existing playback). The bars are a
-   decorative waveform; timecodes are mono. ---- */
-function AudioPlayer({ durationMs, onPlay }: { durationMs: number; onPlay: () => void }) {
+/* ---- Audio player: embeds the local recording via the asset protocol so it
+   plays and scrubs in-app (round violet play/pause, progress-filled waveform,
+   mono timecodes). Falls back to opening the OS player if the src is missing. ---- */
+const BAR_COUNT = 56;
+function AudioPlayer({
+  src,
+  durationMs,
+  onFallback,
+}: {
+  src: string | null;
+  durationMs: number;
+  onFallback: () => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [cur, setCur] = useState(0);
+  const [dur, setDur] = useState(durationMs / 1000);
+
+  useEffect(() => {
+    setDur(durationMs / 1000);
+    setCur(0);
+    setPlaying(false);
+  }, [src, durationMs]);
+
+  const toggle = () => {
+    const a = audioRef.current;
+    if (!a || !src) {
+      onFallback();
+      return;
+    }
+    if (a.paused) void a.play().catch(onFallback);
+    else a.pause();
+  };
+  const seekToFraction = (frac: number) => {
+    const a = audioRef.current;
+    const f = Math.max(0, Math.min(1, frac));
+    if (a && dur > 0 && Number.isFinite(dur)) a.currentTime = f * dur;
+    else setCur(f * dur);
+  };
+  const pct = dur > 0 ? cur / dur : 0;
+
   return (
     <div
       className="mb-4 flex items-center gap-3 rounded-xl border border-line px-3.5 py-2.5"
       style={{ background: "var(--surface-2)" }}
     >
+      {src && (
+        <audio
+          ref={audioRef}
+          src={src}
+          preload="metadata"
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onEnded={() => setPlaying(false)}
+          onTimeUpdate={(e) => setCur(e.currentTarget.currentTime)}
+          onLoadedMetadata={(e) => {
+            if (Number.isFinite(e.currentTarget.duration)) setDur(e.currentTarget.duration);
+          }}
+        />
+      )}
       <Button
         variant="primary"
         size="sm"
-        onClick={onPlay}
-        title="Play recording (opens in your system player)"
-        aria-label="Play recording"
+        onClick={toggle}
+        title={playing ? "Pause" : "Play recording"}
+        aria-label={playing ? "Pause" : "Play recording"}
         className="!h-[38px] !w-[38px] !rounded-full !p-0"
       >
-        <Play size={16} strokeWidth={2} style={{ marginLeft: 2 }} />
+        {playing ? (
+          <Pause size={16} strokeWidth={2} />
+        ) : (
+          <Play size={16} strokeWidth={2} style={{ marginLeft: 2 }} />
+        )}
       </Button>
       <span className="w-10 flex-none font-mono text-[12px]" style={{ color: "var(--text-2)" }}>
-        0:00
+        {fmtElapsed(cur * 1000)}
       </span>
-      <div className="flex flex-1 items-center gap-[2px]" style={{ height: 30 }} aria-hidden="true">
-        {Array.from({ length: 56 }).map((_, i) => {
+      <div
+        className="flex flex-1 cursor-pointer items-center gap-[2px]"
+        style={{ height: 30 }}
+        title="Seek"
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          seekToFraction((e.clientX - r.left) / r.width);
+        }}
+      >
+        {Array.from({ length: BAR_COUNT }).map((_, i) => {
           const h = 5 + (Math.sin(i * 1.7) * 0.5 + 0.5) * 17;
+          const on = i / BAR_COUNT <= pct;
           return (
             <span
               key={i}
               className="flex-1 rounded-[2px]"
-              style={{ height: h, background: "var(--line-strong)", opacity: 0.45 }}
+              style={{ height: h, background: on ? "var(--primary)" : "var(--line-strong)", opacity: on ? 1 : 0.45 }}
             />
           );
         })}
       </div>
       <span className="w-12 flex-none text-right font-mono text-[12px]" style={{ color: "var(--text-3)" }}>
-        {fmtElapsed(durationMs)}
+        {fmtElapsed(dur * 1000)}
       </span>
     </div>
   );
@@ -543,6 +612,7 @@ export default function Editor({
   screenStatus,
   folders,
   templates,
+  dataDir,
   onNoteChanged,
   onMoveNote,
   onStartRecording,
@@ -550,9 +620,13 @@ export default function Editor({
   onStopScreen,
   onTranscribe,
   onRelabel,
+  onEditSegment,
 }: Props) {
   const [title, setTitle] = useState(note.title);
   const [scratchpad, setScratchpad] = useState(note.scratchpad);
+  // Bumped when the editable content must reload (note switch / external insert);
+  // NOT bumped on the user's own typing, so the caret never jumps.
+  const [notesRev, setNotesRev] = useState(0);
   const [saveState, setSaveState] = useState<"saved" | "saving">("saved");
   const [view, setView] = useState<View>(() => (note.blocks.length > 0 ? "enhanced" : "notes"));
   const [templateId, setTemplateId] = useState("tpl-general");
@@ -573,6 +647,7 @@ export default function Editor({
       noteIdRef.current = note.id;
       setTitle(note.title);
       setScratchpad(note.scratchpad);
+      setNotesRev((r) => r + 1);
       setSaveState("saved");
       setView(note.blocks.length > 0 ? "enhanced" : "notes");
       setEnhanceError(null);
@@ -591,6 +666,7 @@ export default function Editor({
   useEffect(() => {
     if (noteIdRef.current === note.id && note.scratchpad !== scratchpad && saveState === "saved") {
       setScratchpad(note.scratchpad);
+      setNotesRev((r) => r + 1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.scratchpad]);
@@ -617,25 +693,6 @@ export default function Editor({
     }, 600);
   };
 
-  // Paste a bare URL → insert it as a markdown link (spec §9).
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    const text = e.clipboardData.getData("text/plain").trim();
-    if (!URL_RE.test(text)) return;
-    e.preventDefault();
-    let label = text;
-    try {
-      const u = new URL(text);
-      label = u.hostname + (u.pathname !== "/" ? u.pathname : "");
-    } catch {
-      /* keep raw url as label */
-    }
-    const md = `[${label}](${text})`;
-    const ta = e.currentTarget;
-    const next = scratchpad.slice(0, ta.selectionStart) + md + scratchpad.slice(ta.selectionEnd);
-    setScratchpad(next);
-    scheduleSave(title, next);
-  };
-
   const attach = async () => {
     const updated = await api.attachFile(note.id);
     if (updated) onNoteChanged(updated);
@@ -660,9 +717,15 @@ export default function Editor({
     }
   };
 
+  const onNotesChange = (md: string) => {
+    setScratchpad(md);
+    scheduleSave(title, md);
+  };
+
   const insertFromAsk = (content: string) => {
     const next = scratchpad ? `${scratchpad}\n\n${content}` : content;
     setScratchpad(next);
+    setNotesRev((r) => r + 1);
     scheduleSave(title, next);
   };
 
@@ -673,6 +736,11 @@ export default function Editor({
 
   const rec = meeting?.recording ?? null;
   const audioPath = rec?.mixed_path || rec?.mic_path || rec?.system_path || null;
+  // Absolute path → asset URL so the <audio> element can stream it in-app.
+  const audioSrc =
+    dataDir && audioPath
+      ? convertFileSrc(`${dataDir.replace(/[\\/]+$/, "")}/${audioPath.replace(/^[\\/]+/, "")}`.replace(/\\/g, "/"))
+      : null;
   const videos = note.attachments.filter(isVideo);
   const playAudio = () => {
     if (audioPath) void api.openAttachment(audioPath);
@@ -781,10 +849,10 @@ export default function Editor({
 
         {/* single content region — one view at a time */}
         <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[var(--content-max)] px-6 pb-28 pt-5">
+          <div className={`mx-auto max-w-[var(--content-max)] px-6 ${showNotes ? "" : "pb-28 pt-5"}`}>
             {enhanceError && (
               <div
-                className="mb-4 rounded-xl border border-line px-4 py-3 text-[13px]"
+                className="mt-4 mb-4 rounded-xl border border-line px-4 py-3 text-[13px]"
                 style={{ background: "var(--error-soft)", color: "var(--error-text)" }}
               >
                 {enhanceError}
@@ -800,7 +868,9 @@ export default function Editor({
             )}
             {showTranscript && !isRecordingThisNote && meeting && (
               <div>
-                {audioPath && <AudioPlayer durationMs={rec?.duration_ms ?? 0} onPlay={playAudio} />}
+                {audioPath && (
+                  <AudioPlayer src={audioSrc} durationMs={rec?.duration_ms ?? 0} onFallback={playAudio} />
+                )}
                 {videos.length > 0 && <VideoStrip videos={videos} onOpen={openAttachmentRel} />}
                 <TranscriptPanel
                   meeting={meeting}
@@ -812,27 +882,24 @@ export default function Editor({
                   highlightIds={zoomIds}
                   onTranscribe={onTranscribe}
                   onRelabel={onRelabel}
+                  onEditSegment={onEditSegment}
                 />
               </div>
             )}
 
             {/* Enhanced view */}
             {showEnhanced && <EnhancedDoc note={note} onNoteChanged={onNoteChanged} onZoom={zoom} />}
+          </div>
 
-            {/* Notes view — stays mounted (display toggle) so it keeps content/caret. */}
-            <div style={{ display: showNotes ? "block" : "none" }}>
-              <textarea
-                value={scratchpad}
-                onChange={(e) => {
-                  setScratchpad(e.target.value);
-                  scheduleSave(title, e.target.value);
-                }}
-                onPaste={handlePaste}
-                placeholder="Write your notes… they'll merge with the transcript when you enhance."
-                className="min-h-[60vh] w-full resize-none bg-transparent text-[15px] leading-[1.72] outline-none placeholder:text-text-3"
-                style={{ color: "var(--text)", caretColor: "var(--primary)" }}
-              />
-            </div>
+          {/* Notes view — full-width (format bar spans, editable is centered);
+              stays mounted via a display toggle so content/caret survive view switches. */}
+          <div style={{ display: showNotes ? "block" : "none" }}>
+            <NotesEditor
+              markdown={scratchpad}
+              revision={notesRev}
+              onChange={onNotesChange}
+              placeholder="Write your notes… they'll merge with the transcript when you enhance."
+            />
           </div>
         </div>
 
