@@ -54,6 +54,9 @@ interface Props {
   pipeDetail: string | null;
   pipelineError: string | null;
   modelProgress: ModelProgress | null;
+  /** whisper-cli engine readiness (null until first settings fetch). */
+  engine: { installed: boolean; managed: boolean } | null;
+  engineInstalling: boolean;
   recStatus: RecordingStatus;
   screenStatus: ScreenStatus;
   folders: Folder[];
@@ -70,6 +73,8 @@ interface Props {
   onStartScreen: (target: CaptureTarget) => void;
   onStopScreen: () => void;
   onTranscribe: () => void;
+  onInstallEngine: () => void;
+  onOpenSettings: () => void;
   onRelabel: (speakerKey: string, label: string) => void;
   onEditSegment: (segmentId: string, text: string) => void;
 }
@@ -777,6 +782,8 @@ export default function Editor({
   pipeDetail,
   pipelineError,
   modelProgress,
+  engine,
+  engineInstalling,
   recStatus,
   screenStatus,
   folders,
@@ -790,6 +797,8 @@ export default function Editor({
   onStartScreen,
   onStopScreen,
   onTranscribe,
+  onInstallEngine,
+  onOpenSettings,
   onRelabel,
   onEditSegment,
 }: Props) {
@@ -1202,8 +1211,12 @@ export default function Editor({
                   stageDetail={pipeDetail}
                   modelProgress={modelProgress}
                   pipelineError={pipelineError}
+                  engine={engine}
+                  engineInstalling={engineInstalling}
                   highlightIds={zoomIds}
                   onTranscribe={onTranscribe}
+                  onInstallEngine={onInstallEngine}
+                  onOpenSettings={onOpenSettings}
                   onRelabel={onRelabel}
                   onAssignNewAttendee={(key, name) => void assignNewAttendee(key, name)}
                   onEditSegment={onEditSegment}

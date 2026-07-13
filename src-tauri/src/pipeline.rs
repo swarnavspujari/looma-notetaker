@@ -264,8 +264,8 @@ pub async fn run_with(
             let exe = models::ensure_tool(
                 on_model,
                 &data_dir,
-                "whisper-bin",
-                &["whisper-cli"],
+                models::WHISPER_ENGINE_ID,
+                models::WHISPER_CLI_NAMES,
                 "install whisper.cpp so cloud transcription has a local fallback",
             )
             .await?;
@@ -291,8 +291,8 @@ pub async fn run_with(
         let whisper_exe = models::ensure_tool(
             on_model,
             &data_dir,
-            "whisper-bin",
-            &["whisper-cli"],
+            models::WHISPER_ENGINE_ID,
+            models::WHISPER_CLI_NAMES,
             "install whisper.cpp (macOS: brew install whisper-cpp; Linux: build from \
              source or use your package manager) or enable the Groq cloud fallback \
              in Settings",
