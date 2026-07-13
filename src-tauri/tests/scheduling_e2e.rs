@@ -29,6 +29,7 @@ impl fly_audio::CaptureSession for StubSession {
             mic_path: None,
             system_path: None,
             mixed_path: None,
+            playback_path: None,
             duration_ms: 0,
         })
     }
@@ -115,6 +116,7 @@ fn transcription_defers_to_recording_then_completes() {
                     mic_path: None,
                     system_path: None,
                     mixed_path: Some(format!("recordings/{}/recording.mixed.wav", meeting.id)),
+                    playback_path: None,
                     duration_ms: 27_540,
                 },
             )
@@ -210,6 +212,7 @@ fn transcription_defers_to_recording_then_completes() {
                     mic_path: output.mic_path.as_ref().and_then(to_rel),
                     system_path: output.system_path.as_ref().and_then(to_rel),
                     mixed_path: output.mixed_path.as_ref().and_then(to_rel),
+                    playback_path: None,
                     duration_ms: output.duration_ms,
                 },
             )
