@@ -1,6 +1,6 @@
 # LLM Benchmarks — default local model decision
 
-*Last run: 2026-07-13, on a Windows 11 laptop — RTX 3050 Laptop (4 GB VRAM), 32 GB RAM,
+*Last run: 2026-07-13/14, on a Windows 11 laptop — RTX 3050 Laptop (4 GB VRAM), 32 GB RAM,
 12 cores. All local models served by Ollama 0.x on this machine; latency numbers are
 end-to-end (prompt → full response) on this hardware and will differ on other machines.*
 
@@ -75,9 +75,138 @@ qwen3.5 can only become the default after `fly-llm` grows Ollama-native `think` 
 
 ### 3.1 Score tables
 
-_(from `target/llm-bench/*/results.json` + `judged.json`)_
+_(from `target/llm-bench/*/results.json` + `judged.json`; default profile — i.e. the
+prompts exactly as the app ships them)_
 
-TBD-TABLES
+**Contract compliance** (hard pass/fail, 3 fixtures):
+
+| Model | Enhance | Polish | Extraction |
+|---|---|---|---|
+| claude-sonnet-5 (reference) | 3/3 | 3/3 | 3/3 |
+| llama3.1 (8B, baseline) | 2/3 | 2/3 | 3/3 |
+| gemma3:4b | 3/3 | 2/3 | 2/3 |
+| gemma4:e4b | 3/3 | 2/3 | 2/3 |
+
+Every Polish failure was caught by the shipped lossless fallback (unparseable batch →
+segments kept raw, zero retention-guard flags fired) — the no-loss design held for every
+model.
+
+**Judge scores** (claude-sonnet-5 scoring closeness to its own reference output, 1–5,
+one-line justification each; see §2 for the circularity caveat):
+
+| Model | Enhance (3 fixtures) | Ask (15 questions) |
+|---|---|---|
+| llama3.1 (8B, baseline) | 2.00 | 4.27 |
+| gemma3:4b | 2.67 | 4.13 |
+| gemma4:e4b | 2.67 | 4.33 |
+
+**Latency (mean per call, this machine) + peak memory** (RSS = `ollama` + `llama-server`
+processes, sampled at 15 s during the runs; VRAM from `/api/ps`):
+
+| Model | Enhance | Polish (per fixture) | Extraction | Ask | Peak RSS | Peak VRAM |
+|---|---|---|---|---|---|---|
+| claude-sonnet-5 (reference) | 13 s | 10 s | 10 s | 4 s | n/a | n/a |
+| llama3.1 (8B, baseline) | 261 s | 626 s | 312 s | 36 s | 8.7 GB | 2.2 GB |
+| gemma3:4b | 357 s | 655 s | 487 s | 26 s | 7.3 GB | 2.3 GB |
+| gemma4:e4b | 603 s | 891 s | 1160 s | 140 s | 5.9 GB | 2.4 GB |
+
+Reading the table: local models on this hardware are **20–100× slower** than the cloud
+reference on every task; gemma4:e4b's 140 s mean per Ask answer is not interactive.
+
+### 3.2 The systematic small-model failure: spoken-number corruption
+
+The budget fixture states the lease as "eighty four hundred" ($8,400/month) and SaaS
+savings as "thirty two hundred" ($3,200/month) — the way people actually say numbers.
+**Every local model corrupted both by 10×** (llama3.1: "$84k/month", "$32,200/month";
+gemma3:4b: "$84,000", "$32,000"); claude-sonnet-5 got both right. For a meeting-notes
+product whose Extraction feature exists to capture figures, this is the strongest
+argument in the whole benchmark against a small local default. Judge lowlights (verbatim
+one-liners):
+
+- llama3.1 / ask q09 — 2/5: "Candidate reports $32,200/month, contradicting reference's
+  $3,200/month figure, a likely fabricated/altered number despite correct owner and
+  deadline."
+- gemma3:4b / enhance budget — 2/5: "Multiple factual errors: lease is $8,400/month not
+  $84,000, SaaS savings is $3,200/month not $32,000, action item owner for recruiter
+  email is Alex not Dana…"
+- gemma4:e4b / ask q10 — 2/5: "Candidate states July 20th while reference states July
+  21st, a factual date discrepancy."
+
+Ask quality is otherwise genuinely decent for all three (means 4.1–4.3/5): direct factual
+recall is a small-model strength; structured multi-fact synthesis (Enhance) is where they
+fall to 2.0–2.7/5 — coarse structure (gemma4 often returned ONE giant block), missing
+metrics, misfiled action items.
+
+## 4. Contract-failure examples (verbatim)
+
+**llama3.1, Enhance (budget)** — emits a `"sources"` key *outside* its object, malformed
+JSON, so the shipped parser falls back to untraced paragraphs (provenance lost):
+
+```
+  {"type": "ai", "markdown": "* Office lease renewed at $84k per month for 12 months"}, "sources": [13, 14, 16],
+```
+
+(Note the 10× number corruption inside the same line.)
+
+**llama3.1, Polish (product)** — prose preamble is tolerated by the parser, but the JSON
+itself has a delimiter error at char ~1789; batch dropped, all 29 segments kept raw:
+
+```
+Here is the cleaned transcript:
+
+{"segments":[{"id":"seg001","speaker":"mic","start":0,"text":"Alright, this is the …
+```
+
+**gemma3:4b, Extraction (standup)** — `segment_ids` emitted as a *string* instead of an
+array; serde rejects the batch, 0 items extracted:
+
+```
+    "speaker_key": "(mic)",
+    "segment_ids": "[seg023]"
+```
+
+**gemma4:e4b, Polish (budget)** — returned a bare `[{"id","text"}…]` array instead of the
+required `{"segments":[…]}` wrapper; batch dropped losslessly.
+
+## 5. Recommendation: don't switch (and what would change that)
+
+**Recommendation: keep `llama3.1` as the default local model for now.**
+
+1. **No candidate wins decisively through the app's current plumbing.** gemma3:4b trades
+   llama3.1's Enhance weakness (2/3 contract, judge 2.00 vs 2.67) for a new Extraction
+   weakness (2/3 vs 3/3) at similar speed; gemma4:e4b matches gemma3's quality at 2–5×
+   the latency (140 s per Ask answer). Nothing approaches the cloud reference.
+2. **The most promising candidate is blocked on plumbing, not quality.** qwen3.5:4b
+   produced perfect JSON in 41 s via Ollama-native `think: false` — by far the best
+   small-model probe result — but is literally unusable (empty responses) through the
+   OpenAI-compat path the app speaks (§3.0).
+3. **All small models corrupt spoken numbers** (§3.2). Whatever the default, the honest
+   product posture is that local = private-but-approximate and Anthropic remains the
+   quality path.
+
+**What would change the decision:** add Ollama-native `/api/chat` support (or `think`
+control) to `fly-llm`, then re-run this benchmark with qwen3.5:4b included. Its probe
+profile (fast, contract-clean, 256K context) suggests it could beat everything above.
+
+### Prompt-profile adjustments (measured on the fly-core profile seam)
+
+Variant runs (`LLM_BENCH_VARIANT=…`, single run per cell — treat small deltas as noise):
+
+| Adjustment | gemma3:4b Extraction | llama3.1 Enhance |
+|---|---|---|
+| default | 2/3 (schema drift: `segment_ids` as string) | 2/3 (malformed JSON), judge 2.00 |
+| **simplified contract** | **3/3**, item counts intact (12/9/8) | **3/3**, ~30 % faster (189 s vs 261 s) — but judge **1.67**: the contract's inline example ("Ship Friday", "my note") **leaks into the notes as invented content** |
+| few-shot preamble | 3/3 but recall suppressed (5–6 items vs 11–13) | not run |
+| "no preamble" instruction | 3/3, best item counts (12/12/9) | not run |
+
+Takeaways: **simplified contract phrasing is the most effective single adjustment for
+extraction-style tasks** (fixes schema drift without hurting recall); inline examples
+are dangerous on llama3.1, which copies them into output — a future llama3.1 profile
+should prefer an example-free simplified contract. The gemma3 standup extraction failure
+was also fixed by the *no-preamble* variant, so that failure is likely stochastic —
+another reason not to over-fit profiles to single runs. **The registry ships empty**: no
+adjustment produced an unambiguous quality win for the current default model, and
+per the registry's own rule, profiles are added only for measured, reproducible failures.
 
 ## 4. Contract-failure examples (verbatim)
 

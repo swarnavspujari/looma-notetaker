@@ -81,9 +81,10 @@ pub const DEFAULT_PROFILE: PromptProfile = PromptProfile {
 
 /// The registry: `(model base name, profile)`. Keys match the model string
 /// with any `:tag` suffix stripped. Intentionally empty today — see the
-/// module docs for the checklist before adding an entry. (The llm_bench
-/// harness measured no llama3.1 contract regressions that a profile would
-/// fix; see docs/BENCHMARKS.md.)
+/// module docs for the checklist before adding an entry. (llm_bench measured
+/// llama3.1 contract failures, but the candidate fix — the simplified
+/// contract — leaked its inline example into llama3.1's output and scored
+/// WORSE on quality, so no profile earned its way in; docs/BENCHMARKS.md §5.)
 const PROFILES: &[(&str, PromptProfile)] = &[];
 
 /// Look up the profile for a resolved model string (`"llama3.1:latest"`,
