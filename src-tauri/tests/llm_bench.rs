@@ -957,7 +957,6 @@ fn llm_bench() {
         }
     };
     let variant = std::env::var("LLM_BENCH_VARIANT").unwrap_or_else(|_| "default".into());
-    let profile = variant_profile(&variant);
     // Experiment knob: force ThinkingMode::Disabled on ALL tasks (the app
     // ships Default for enhance/ask). Runs get a distinct "-nothink" slug.
     let force_no_think = std::env::var("LLM_BENCH_THINKING").as_deref() == Ok("disabled");
@@ -979,6 +978,14 @@ fn llm_bench() {
             .split_once(':')
             .expect("model spec must be provider:model");
         let provider = build_provider(provider_id, model).expect("provider");
+        // "default" measures what the app ships: the MODEL's registry profile
+        // (profile_for), exactly like build_provider's call sites. Named
+        // variants override it for experiments.
+        let profile = if variant == "default" {
+            *fly_core::prompt_profile::profile_for(model)
+        } else {
+            variant_profile(&variant)
+        };
         let mut run_slug = slug(provider_id, model, &variant);
         if force_no_think {
             run_slug.push_str("-nothink");
