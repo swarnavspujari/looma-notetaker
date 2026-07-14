@@ -1,9 +1,20 @@
 //! OpenAI-compatible chat provider — one implementation covers OpenAI,
-//! NVIDIA NIM, and local Ollama (all speak `POST /chat/completions`).
+//! NVIDIA NIM, and local Ollama.
+//!
+//! OpenAI and NIM speak `POST {base}/v1/chat/completions`. Ollama instead
+//! uses its NATIVE `POST {root}/api/chat`: the OpenAI-compat endpoint has no
+//! way to control "thinking", so thinking models (qwen3.5, deepseek-r1, …)
+//! burn the whole token budget on a `reasoning` field the compat response
+//! parser never sees and return EMPTY content (measured in
+//! docs/BENCHMARKS.md). The native endpoint accepts `"think": false`
+//! (`ThinkingMode::Disabled`); `ThinkingMode::Default` omits the field so
+//! every model keeps its own default. Non-thinking models on current Ollama
+//! ignore `think: false`; older servers that reject it get one retry with
+//! the field stripped.
 
 use serde_json::json;
 
-use crate::{ChatRequest, LLMProvider, LlmError, Result, Role};
+use crate::{ChatRequest, LLMProvider, LlmError, Result, Role, ThinkingMode};
 
 pub struct OpenAiCompatProvider {
     /// "openai" | "nim" | "ollama"
@@ -69,21 +80,10 @@ impl LLMProvider for OpenAiCompatProvider {
     }
 
     async fn chat(&self, req: ChatRequest) -> Result<String> {
-        let messages: Vec<_> = req
-            .messages
-            .iter()
-            .map(|m| json!({"role": role_str(m.role), "content": m.content}))
-            .collect();
-        let mut body = json!({
-            "model": self.model,
-            "messages": messages,
-        });
-        if let Some(t) = req.temperature {
-            body["temperature"] = json!(t);
+        if self.provider_id == "ollama" {
+            return self.chat_ollama_native(&req).await;
         }
-        if let Some(mt) = req.max_tokens {
-            body["max_tokens"] = json!(mt);
-        }
+        let body = openai_chat_body(&self.model, &req);
 
         let client = reqwest::Client::new();
         let mut http = client
@@ -128,6 +128,118 @@ impl LLMProvider for OpenAiCompatProvider {
     }
 }
 
+impl OpenAiCompatProvider {
+    /// The Ollama server root (no `/v1`). Settings may store either form —
+    /// same normalization the app's ollama manager applies.
+    fn ollama_root(&self) -> String {
+        let u = self.base_url.trim().trim_end_matches('/');
+        let u = u.strip_suffix("/v1").unwrap_or(u);
+        u.trim_end_matches('/').to_string()
+    }
+
+    /// Ollama native `POST {root}/api/chat`. Retries once without `think`
+    /// when an older server rejects the field (they answer 400 mentioning
+    /// thinking support).
+    async fn chat_ollama_native(&self, req: &ChatRequest) -> Result<String> {
+        let root = self.ollama_root();
+        let client = reqwest::Client::new();
+        let mut include_think = req.thinking == ThinkingMode::Disabled;
+        loop {
+            let body = native_chat_body(&self.model, req, include_think);
+            let resp = client
+                .post(format!("{root}/api/chat"))
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| {
+                    crate::transport_error(self.provider_id, self.local, &self.base_url, e)
+                })?;
+            let status = resp.status();
+            let text = resp
+                .text()
+                .await
+                .map_err(|e| LlmError::Network(e.to_string()))?;
+            if !status.is_success() {
+                if include_think && status.as_u16() == 400 && text.to_lowercase().contains("think")
+                {
+                    // Older server / non-thinking model that rejects the
+                    // field instead of ignoring it: drop `think` and retry.
+                    include_think = false;
+                    continue;
+                }
+                return Err(LlmError::Provider(format!(
+                    "{status}: {}",
+                    text.chars().take(300).collect::<String>()
+                )));
+            }
+            return parse_native_chat(&text);
+        }
+    }
+}
+
+/// Request body for the OpenAI-compatible `/chat/completions` endpoint
+/// (OpenAI, NIM). `thinking` has no representation here and is ignored.
+fn openai_chat_body(model: &str, req: &ChatRequest) -> serde_json::Value {
+    let messages: Vec<_> = req
+        .messages
+        .iter()
+        .map(|m| json!({"role": role_str(m.role), "content": m.content}))
+        .collect();
+    let mut body = json!({
+        "model": model,
+        "messages": messages,
+    });
+    if let Some(t) = req.temperature {
+        body["temperature"] = json!(t);
+    }
+    if let Some(mt) = req.max_tokens {
+        body["max_tokens"] = json!(mt);
+    }
+    body
+}
+
+/// Request body for Ollama's native `/api/chat`. `max_tokens` maps to
+/// `options.num_predict`, `temperature` to `options.temperature`;
+/// `include_think` adds `"think": false` (we never ask for MORE thinking —
+/// `ThinkingMode::Default` leaves the model's own default in place).
+fn native_chat_body(model: &str, req: &ChatRequest, include_think: bool) -> serde_json::Value {
+    let messages: Vec<_> = req
+        .messages
+        .iter()
+        .map(|m| json!({"role": role_str(m.role), "content": m.content}))
+        .collect();
+    let mut body = json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+    });
+    if include_think {
+        body["think"] = json!(false);
+    }
+    let mut options = serde_json::Map::new();
+    if let Some(t) = req.temperature {
+        options.insert("temperature".into(), json!(t));
+    }
+    if let Some(mt) = req.max_tokens {
+        options.insert("num_predict".into(), json!(mt));
+    }
+    if !options.is_empty() {
+        body["options"] = serde_json::Value::Object(options);
+    }
+    body
+}
+
+/// Parse Ollama's native chat response: the answer is `message.content`
+/// (`message.thinking` carries any reasoning trace and is ignored).
+pub fn parse_native_chat(json_text: &str) -> Result<String> {
+    let v: serde_json::Value = serde_json::from_str(json_text)
+        .map_err(|e| LlmError::Provider(format!("bad JSON from provider: {e}")))?;
+    v.pointer("/message/content")
+        .and_then(|c| c.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| LlmError::Provider("response had no message content".into()))
+}
+
 pub fn parse_chat_completion(json_text: &str) -> Result<String> {
     let v: serde_json::Value = serde_json::from_str(json_text)
         .map_err(|e| LlmError::Provider(format!("bad JSON from provider: {e}")))?;
@@ -140,6 +252,7 @@ pub fn parse_chat_completion(json_text: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ChatMessage;
 
     #[test]
     fn parses_chat_completion_content() {
@@ -150,5 +263,79 @@ mod tests {
     #[test]
     fn missing_content_is_provider_error() {
         assert!(parse_chat_completion(r#"{"choices":[]}"#).is_err());
+    }
+
+    fn req(thinking: ThinkingMode) -> ChatRequest {
+        ChatRequest {
+            messages: vec![
+                ChatMessage::system("sys"),
+                ChatMessage::user("hi"),
+                ChatMessage::assistant("yo"),
+            ],
+            temperature: Some(0.2),
+            max_tokens: Some(4096),
+            thinking,
+        }
+    }
+
+    #[test]
+    fn native_body_maps_options_and_disables_thinking() {
+        let body = native_chat_body("qwen3.5:4b", &req(ThinkingMode::Disabled), true);
+        assert_eq!(body["model"], "qwen3.5:4b");
+        assert_eq!(body["stream"], false);
+        assert_eq!(body["think"], false);
+        let temp = body["options"]["temperature"].as_f64().unwrap();
+        assert!((temp - 0.2).abs() < 1e-6, "temperature was {temp}");
+        assert_eq!(body["options"]["num_predict"], 4096);
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][1]["content"], "hi");
+        assert_eq!(body["messages"][2]["role"], "assistant");
+    }
+
+    #[test]
+    fn native_body_default_thinking_omits_think_field() {
+        // ThinkingMode::Default is a no-op: the model keeps its own default.
+        let body = native_chat_body("llama3.1", &req(ThinkingMode::Default), false);
+        assert!(body.get("think").is_none());
+    }
+
+    #[test]
+    fn native_body_omits_empty_options() {
+        let mut r = req(ThinkingMode::Default);
+        r.temperature = None;
+        r.max_tokens = None;
+        let body = native_chat_body("llama3.1", &r, false);
+        assert!(body.get("options").is_none());
+    }
+
+    #[test]
+    fn openai_body_keeps_compat_shape_and_ignores_thinking() {
+        let body = openai_chat_body("gpt-4o-mini", &req(ThinkingMode::Disabled));
+        assert_eq!(body["max_tokens"], 4096);
+        let temp = body["temperature"].as_f64().unwrap();
+        assert!((temp - 0.2).abs() < 1e-6, "temperature was {temp}");
+        assert!(body.get("think").is_none());
+        assert!(body.get("stream").is_none());
+        assert!(body.get("options").is_none());
+    }
+
+    #[test]
+    fn parses_native_chat_content_and_ignores_thinking_trace() {
+        let json = r#"{"message":{"role":"assistant","thinking":"...","content":"[{\"k\":1}]"},"done":true}"#;
+        assert_eq!(parse_native_chat(json).unwrap(), r#"[{"k":1}]"#);
+        assert!(parse_native_chat(r#"{"done":true}"#).is_err());
+    }
+
+    #[test]
+    fn ollama_root_strips_v1_suffix() {
+        for (base, want) in [
+            ("http://localhost:11434/v1", "http://localhost:11434"),
+            ("http://localhost:11434/v1/", "http://localhost:11434"),
+            ("http://localhost:11434", "http://localhost:11434"),
+            ("http://box:8080/v1", "http://box:8080"),
+        ] {
+            let p = OpenAiCompatProvider::ollama(Some(base.into()), "m".into());
+            assert_eq!(p.ollama_root(), want, "base: {base}");
+        }
     }
 }

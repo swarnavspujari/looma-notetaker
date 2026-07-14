@@ -14,6 +14,8 @@
 //!   LLM_BENCH_OUT=target/llm-bench                # default
 //!   LLM_BENCH_TASKS=enhance,polish,extract,ask    # default all
 //!   LLM_BENCH_VARIANT=default|simple|fewshot|nopreamble   # profile experiment
+//!   LLM_BENCH_THINKING=disabled   # force ThinkingMode::Disabled on ALL tasks
+//!                                 # (thinking-model ceiling; "-nothink" slug)
 //!   ANTHROPIC_API_KEY=sk-ant-...   # anthropic models; falls back to the
 //!                                  # app keychain (service com.flyonthewall.app)
 //!     cargo test -p fly-app --test llm_bench -- --ignored --nocapture
@@ -399,10 +401,21 @@ async fn run_generate(
     manifest: &Manifest,
     fixtures: &[Fixture],
     tasks: &[String],
+    force_no_think: bool,
     out: &mut RunResult,
 ) {
     let local = provider.is_local();
     let want = |t: &str| tasks.iter().any(|x| x == t);
+    // LLM_BENCH_THINKING=disabled experiment: force ThinkingMode::Disabled on
+    // ALL tasks (the app ships Default for enhance/ask) to measure a thinking
+    // model's ceiling when its reasoning is off everywhere.
+    let th = |shipped: ThinkingMode| {
+        if force_no_think {
+            ThinkingMode::Disabled
+        } else {
+            shipped
+        }
+    };
 
     for f in fixtures {
         let meeting_id = format!("bench-{}", f.spec.id);
@@ -431,7 +444,7 @@ async fn run_generate(
                     ],
                     temperature: Some(0.2),
                     max_tokens: Some(profile.max_tokens.enhance.unwrap_or(4096)),
-                    thinking: ThinkingMode::Default,
+                    thinking: th(ThinkingMode::Default),
                 },
             )
             .await;
@@ -501,7 +514,7 @@ async fn run_generate(
                         ],
                         temperature: None,
                         max_tokens: Some(profile.max_tokens.polish.unwrap_or(8192)),
-                        thinking: ThinkingMode::Disabled,
+                        thinking: th(ThinkingMode::Disabled),
                     },
                 )
                 .await
@@ -575,7 +588,7 @@ async fn run_generate(
                         ],
                         temperature: None,
                         max_tokens: Some(profile.max_tokens.extract.unwrap_or(8192)),
-                        thinking: ThinkingMode::Disabled,
+                        thinking: th(ThinkingMode::Disabled),
                     },
                 )
                 .await
@@ -874,6 +887,9 @@ fn llm_bench() {
     };
     let variant = std::env::var("LLM_BENCH_VARIANT").unwrap_or_else(|_| "default".into());
     let profile = variant_profile(&variant);
+    // Experiment knob: force ThinkingMode::Disabled on ALL tasks (the app
+    // ships Default for enhance/ask). Runs get a distinct "-nothink" slug.
+    let force_no_think = std::env::var("LLM_BENCH_THINKING").as_deref() == Ok("disabled");
     let tasks: Vec<String> = std::env::var("LLM_BENCH_TASKS")
         .unwrap_or_else(|_| "enhance,polish,extract,ask".into())
         .split(',')
@@ -888,7 +904,10 @@ fn llm_bench() {
             .split_once(':')
             .expect("model spec must be provider:model");
         let provider = build_provider(provider_id, model).expect("provider");
-        let run_slug = slug(provider_id, model, &variant);
+        let mut run_slug = slug(provider_id, model, &variant);
+        if force_no_think {
+            run_slug.push_str("-nothink");
+        }
         eprintln!("=== {run_slug} (tasks: {}) ===", tasks.join(","));
         let mut result = RunResult {
             provider: provider_id.into(),
@@ -903,6 +922,7 @@ fn llm_bench() {
             &manifest,
             &fixtures,
             &tasks,
+            force_no_think,
             &mut result,
         ));
         eprintln!(
