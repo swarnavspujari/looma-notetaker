@@ -161,7 +161,11 @@ pub async fn enhance_note(
             } else {
                 ThinkingMode::Default
             },
-            format: None,
+            // Grammar-constrained output for profiled models (llama3.1);
+            // ignored by non-Ollama providers.
+            format: profile
+                .constrained_enhance
+                .then(enhance::enhance_blocks_schema),
         })
         .await
         .map_err(|e| e.to_string())?;
@@ -278,13 +282,18 @@ pub async fn run_polish(state: &AppState, meeting_id: &str) -> Result<PolishResu
                 // lives in the system prompt, and the default model
                 // (claude-sonnet-5) rejects an explicit `temperature` with a
                 // 400. Omitting it works across every provider.
-                temperature: None,
+                // Profiled models add temperature 0 (measured as a pair
+                // with the schema below); the Anthropic allowlist still
+                // strips temperature where the model rejects it.
+                temperature: profile.constrained_json.then_some(0.0),
                 max_tokens: Some(profile.max_tokens.polish.unwrap_or(8192)),
                 // Cleanup is mechanical; disable thinking so adaptive reasoning
                 // tokens don't eat the budget and truncate the JSON mid-array
                 // (claude-sonnet-5 thinks by default — see AnthropicProvider).
                 thinking: ThinkingMode::Disabled,
-                format: None,
+                format: profile
+                    .constrained_json
+                    .then(enhance::cleanup_response_schema),
             })
             .await
             .map_err(|e| e.to_string())?;

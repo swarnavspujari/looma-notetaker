@@ -104,6 +104,27 @@ pub fn build_extraction_prompt(
     ExtractionPrompt { system, user }
 }
 
+/// JSON schema of the extraction item array — machine-readable twin of
+/// `RawExtractedItem`. Applied as an Ollama `format` grammar for profiles
+/// with `constrained_json`.
+pub fn extraction_items_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["decision", "action_item", "question", "commitment", "figure"]},
+                "text": {"type": "string"},
+                "owner": {"type": ["string", "null"]},
+                "status": {"type": ["string", "null"]},
+                "speaker_key": {"type": ["string", "null"]},
+                "segment_ids": {"type": "array", "items": {"type": "string"}}
+            },
+            "required": ["kind", "text", "owner", "status", "speaker_key", "segment_ids"]
+        }
+    })
+}
+
 /// One element of the model's JSON array, before validation.
 #[derive(Debug, Deserialize)]
 pub struct RawExtractedItem {
@@ -217,10 +238,12 @@ pub async fn extract_items(
                 // No temperature (claude-sonnet-5 rejects it) and no thinking
                 // (reasoning tokens would eat the budget and truncate the
                 // JSON) — same contract as the polish pass.
-                temperature: None,
+                // Same profile-gated pair as the polish pass: schema +
+                // temperature 0 for models measured with them.
+                temperature: profile.constrained_json.then_some(0.0),
                 max_tokens: Some(profile.max_tokens.extract.unwrap_or(8192)),
                 thinking: ThinkingMode::Disabled,
-                format: None,
+                format: profile.constrained_json.then(extraction_items_schema),
             })
             .await
             .map_err(|e| e.to_string())?;

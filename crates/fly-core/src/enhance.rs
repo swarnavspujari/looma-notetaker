@@ -94,6 +94,25 @@ pub fn build_enhance_prompt(
     }
 }
 
+/// JSON schema of the Enhance block array — the machine-readable twin of the
+/// contract above. Models whose profile sets `constrained_enhance` get it as
+/// an Ollama `format` grammar, making malformed output impossible. Keep it in
+/// lockstep with `RawBlock`/`parse_enhanced_blocks`.
+pub fn enhance_blocks_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "array",
+        "items": {
+            "type": "object",
+            "properties": {
+                "type": {"type": "string", "enum": ["user", "ai"]},
+                "markdown": {"type": "string"},
+                "sources": {"type": "array", "items": {"type": "integer"}}
+            },
+            "required": ["type", "markdown", "sources"]
+        }
+    })
+}
+
 #[derive(Deserialize)]
 struct RawBlock {
     #[serde(rename = "type")]
@@ -328,6 +347,29 @@ struct CleanupResponse {
 struct CleanedSegment {
     id: String,
     text: String,
+}
+
+/// JSON schema of the cleanup response — machine-readable twin of the
+/// `{"segments":[{"id","text"}…]}` shape `parse_cleanup_response` expects.
+/// Applied as an Ollama `format` grammar for profiles with `constrained_json`.
+pub fn cleanup_response_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "segments": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "string"},
+                        "text": {"type": "string"}
+                    },
+                    "required": ["id", "text"]
+                }
+            }
+        },
+        "required": ["segments"]
+    })
 }
 
 /// Parse a cleanup response into (id, cleaned-text) pairs, tolerating code

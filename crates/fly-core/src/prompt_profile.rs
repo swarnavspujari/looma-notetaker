@@ -30,7 +30,11 @@
 //!      polish / 8192 extract / 2048 ask);
 //!    - `disable_thinking: true` for local thinking models whose reasoning
 //!      trace eats the output budget (empty/truncated answers on the
-//!      `ThinkingMode::Default` call sites — Enhance and Ask).
+//!      `ThinkingMode::Default` call sites — Enhance and Ask);
+//!    - `constrained_json: true` to grammar-constrain Polish/Extraction
+//!      (safe and better on every model measured so far);
+//!    - `constrained_enhance: true` ONLY with a measured run — the enhance
+//!      grammar helps llama3.1 but collapses qwen3.5 to empty output.
 //! 3. Re-run the benchmark with the profile applied and record the delta
 //!    in `docs/BENCHMARKS.md` before changing any default-model constant.
 //! 4. If the model becomes a provider default, update the `PROVIDERS`
@@ -65,6 +69,19 @@ pub struct PromptProfile {
     /// measured in docs/BENCHMARKS.md §3.0/§6. Leave false for cloud models:
     /// Anthropic's adaptive thinking helps Enhance/Ask quality there.
     pub disable_thinking: bool,
+    /// Grammar-constrain the two extraction-shaped JSON tasks (Polish,
+    /// Extraction) with their output schemas + temperature 0. Measured safe
+    /// AND better on both profiled models (llama3.1 and qwen3.5 each went
+    /// 9/9 on these contracts vs 4–6/9 free-form; docs/BENCHMARKS.md §10).
+    /// Only the Ollama provider honors `ChatRequest.format`; the Anthropic
+    /// temperature allowlist already strips temperature where rejected.
+    pub constrained_json: bool,
+    /// Grammar-constrain Enhance with the block-array schema. PER-MODEL by
+    /// necessity: llama3.1 went 9/9 with slightly better judged quality,
+    /// but the same constraint makes qwen3.5 emit a grammar-valid EMPTY
+    /// array (judge 1.00/5) — never enable this without a measured run
+    /// (docs/BENCHMARKS.md §10).
+    pub constrained_enhance: bool,
 }
 
 impl PromptProfile {
@@ -96,6 +113,8 @@ pub const DEFAULT_PROFILE: PromptProfile = PromptProfile {
         ask: None,
     },
     disable_thinking: false,
+    constrained_json: false,
+    constrained_enhance: false,
 };
 
 /// The registry: `(model base name, profile)`. Keys match the model string
@@ -105,14 +124,29 @@ pub const DEFAULT_PROFILE: PromptProfile = PromptProfile {
 /// inline example into llama3.1's output and scored WORSE on quality, so no
 /// llama3.1 profile earned its way in; docs/BENCHMARKS.md §5.)
 const PROFILES: &[(&str, PromptProfile)] = &[
+    // The default local model. Constrained decoding took it from 7/9 to
+    // 27/27 contract passes across 3 runs with slightly BETTER judged
+    // quality (2.22 vs 1.67) and no latency cost (docs/BENCHMARKS.md §10).
+    // Measured 2026-07-14.
+    (
+        "llama3.1",
+        PromptProfile {
+            constrained_json: true,
+            constrained_enhance: true,
+            ..DEFAULT_PROFILE
+        },
+    ),
     // qwen3.5 reasons unconditionally; with thinking on, Enhance came back
     // EMPTY (0/3 contract) and 3/15 Ask answers were empty because the trace
-    // consumed the output budget. With thinking off it posts the best local
-    // scores in the benchmark (docs/BENCHMARKS.md §6). Measured 2026-07-14.
+    // consumed the output budget (docs/BENCHMARKS.md §6). Schemas fixed its
+    // Polish/Extraction contracts (4-6/9 → 9/9) — but constrained_enhance
+    // stays OFF: under the enhance grammar it emits a valid EMPTY array
+    // (§10). Measured 2026-07-14.
     (
         "qwen3.5",
         PromptProfile {
             disable_thinking: true,
+            constrained_json: true,
             ..DEFAULT_PROFILE
         },
     ),
@@ -135,16 +169,45 @@ mod tests {
 
     #[test]
     fn unknown_models_get_the_default_profile() {
-        for m in ["llama3.1", "llama3.1:latest", "claude-sonnet-5", "", "mock"] {
+        // Unmeasured models — including the gemmas and cloud models — keep
+        // byte-identical behavior: no schemas, no thinking change, nothing.
+        for m in [
+            "claude-sonnet-5",
+            "gemma3:4b",
+            "gemma4:e4b",
+            "gpt-4o-mini",
+            "",
+            "mock",
+        ] {
             assert_eq!(profile_for(m), &DEFAULT_PROFILE, "model {m:?}");
         }
     }
 
     #[test]
-    fn qwen35_profile_disables_thinking_and_nothing_else() {
+    fn llama31_profile_constrains_output_and_nothing_else() {
+        for m in ["llama3.1", "llama3.1:latest", "llama3.1:8b"] {
+            let p = profile_for(m);
+            assert!(p.constrained_json && p.constrained_enhance, "model {m:?}");
+            assert!(!p.disable_thinking);
+            // Prompts stay byte-identical to the default profile.
+            assert_eq!(p.system_preamble, None);
+            assert!(!p.simplified_contract);
+            assert_eq!(p.max_tokens, DEFAULT_PROFILE.max_tokens);
+        }
+        // Other llama families are NOT matched.
+        assert_eq!(profile_for("llama3.2:3b"), &DEFAULT_PROFILE);
+        assert_eq!(profile_for("llama3:8b"), &DEFAULT_PROFILE);
+    }
+
+    #[test]
+    fn qwen35_profile_disables_thinking_and_constrains_json_only() {
         for m in ["qwen3.5", "qwen3.5:4b", "qwen3.5:latest"] {
             let p = profile_for(m);
             assert!(p.disable_thinking, "model {m:?}");
+            assert!(p.constrained_json, "model {m:?}");
+            // NEVER the enhance grammar: qwen emits a valid empty array
+            // under it (docs/BENCHMARKS.md §10).
+            assert!(!p.constrained_enhance, "model {m:?}");
             // Prompts stay byte-identical to the default profile.
             assert_eq!(p.system_preamble, None);
             assert!(!p.simplified_contract);

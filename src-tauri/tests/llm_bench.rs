@@ -219,65 +219,6 @@ fn variant_profile(variant: &str) -> PromptProfile {
     }
 }
 
-// ---------------------------------------------------------------------------
-// "engineered" variant: community harness techniques — grammar-constrained
-// decoding (Ollama `format` JSON schemas) for the three JSON tasks, plus
-// temperature 0 for the extraction-shaped ones. Prompts stay identical.
-// ---------------------------------------------------------------------------
-
-fn enhance_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["user", "ai"]},
-                "markdown": {"type": "string"},
-                "sources": {"type": "array", "items": {"type": "integer"}}
-            },
-            "required": ["type", "markdown", "sources"]
-        }
-    })
-}
-
-fn polish_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "object",
-        "properties": {
-            "segments": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "id": {"type": "string"},
-                        "text": {"type": "string"}
-                    },
-                    "required": ["id", "text"]
-                }
-            }
-        },
-        "required": ["segments"]
-    })
-}
-
-fn extract_schema() -> serde_json::Value {
-    serde_json::json!({
-        "type": "array",
-        "items": {
-            "type": "object",
-            "properties": {
-                "kind": {"type": "string", "enum": ["decision", "action_item", "question", "commitment", "figure"]},
-                "text": {"type": "string"},
-                "owner": {"type": ["string", "null"]},
-                "status": {"type": ["string", "null"]},
-                "speaker_key": {"type": ["string", "null"]},
-                "segment_ids": {"type": "array", "items": {"type": "string"}}
-            },
-            "required": ["kind", "text", "owner", "status", "speaker_key", "segment_ids"]
-        }
-    })
-}
-
 async fn chat_with_retry(provider: &dyn LLMProvider, req: ChatRequest) -> Result<String, String> {
     let mut last = String::new();
     for attempt in 1..=3u64 {
@@ -459,6 +400,7 @@ fn slug(provider: &str, model: &str, variant: &str) -> String {
     format!("{provider}-{m}-{variant}")
 }
 
+#[allow(clippy::too_many_arguments)] // flat knobs read clearer than a config struct here
 async fn run_generate(
     provider: &dyn LLMProvider,
     profile: &PromptProfile,
@@ -482,6 +424,10 @@ async fn run_generate(
             shipped
         }
     };
+    // Output-constraint gates mirror the app's call sites; the "engineered"
+    // variant forces them everywhere as an experiment.
+    let constrain_json = engineered || profile.constrained_json;
+    let constrain_enhance = engineered || profile.constrained_enhance;
 
     for f in fixtures {
         let meeting_id = format!("bench-{}", f.spec.id);
@@ -511,7 +457,7 @@ async fn run_generate(
                     temperature: Some(0.2),
                     max_tokens: Some(profile.max_tokens.enhance.unwrap_or(4096)),
                     thinking: th(ThinkingMode::Default),
-                    format: engineered.then(enhance_schema),
+                    format: constrain_enhance.then(fly_core::enhance::enhance_blocks_schema),
                 },
             )
             .await;
@@ -579,10 +525,10 @@ async fn run_generate(
                             ChatMessage::system(prompt.system),
                             ChatMessage::user(prompt.user),
                         ],
-                        temperature: if engineered { Some(0.0) } else { None },
+                        temperature: constrain_json.then_some(0.0),
                         max_tokens: Some(profile.max_tokens.polish.unwrap_or(8192)),
                         thinking: th(ThinkingMode::Disabled),
-                        format: engineered.then(polish_schema),
+                        format: constrain_json.then(fly_core::enhance::cleanup_response_schema),
                     },
                 )
                 .await
@@ -654,10 +600,11 @@ async fn run_generate(
                             ChatMessage::system(prompt.system),
                             ChatMessage::user(prompt.user),
                         ],
-                        temperature: if engineered { Some(0.0) } else { None },
+                        temperature: constrain_json.then_some(0.0),
                         max_tokens: Some(profile.max_tokens.extract.unwrap_or(8192)),
                         thinking: th(ThinkingMode::Disabled),
-                        format: engineered.then(extract_schema),
+                        format: constrain_json
+                            .then(fly_app_lib::extraction::extraction_items_schema),
                     },
                 )
                 .await
