@@ -331,7 +331,7 @@ and `crates/fly-llm/src/openai_compat.rs` against docs.ollama.com:
    observed); (c) the docs' cloud-model deprecation table (e.g. `gemma3:4b` cloud retiring
    2026-07-15) does not affect local tags — no action.
 
-## 9. Updated recommendation
+## 9. Updated recommendation (superseded by §10 after the fixes shipped)
 
 **Short term: still don't switch.** The as-shipped default (llama3.1) works everywhere
 today, and qwen3.5:4b's headline numbers require flipping Enhance/Ask to
@@ -347,7 +347,66 @@ the switch, not precede it silently.
    if the qwen edge holds, switch the default to `qwen3.5:4b` with a profile entry.
 4. Independently: structured outputs for Extraction (§7.1), corrective retry (§7.2).
 
-## 10. Reproducing
+## 10. Follow-up 2 (2026-07-14): fixes shipped, 3× repeat runs, harness engineering
+
+Shipped since §9 (all committed on this branch): the `num_ctx` fix (§8.1 — auto-sized per
+request, marker-tested live through the provider), `ChatRequest.format` (JSON-schema
+constrained decoding on the native path), and the profile **thinking knob**
+(`PromptProfile.disable_thinking`, first registry entry: `qwen3.5`). Every run below goes
+through the app's now-shipped native path; each cell is **3 runs × 3 fixtures** (llama
+default: 1 native-path run — its contract pattern matched the compat-path run and re-runs
+were spent on the engineered cells instead). "Engineered" = community harness: `format`
+JSON schemas on the three JSON tasks + temperature 0 on polish/extract; prompts identical.
+
+| Config | Contracts E / P / X | Judge Enh / Ask | Latency E/P/X/Ask | Empty Asks |
+|---|---|---|---|---|
+| llama3.1 default | 2/3 · 2/3 · 3/3 | 1.67 / 4.33 | 64 / 167 / 124 / **11 s** | 0/15 |
+| **llama3.1 engineered** | **9/9 · 9/9 · 9/9** | 2.22 / 4.27 | 65 / 111 / 91 / **11 s** | **0/45** |
+| qwen3.5:4b shipped (profile) | 8/9 · 4/9 · 6/9 | **3.11** / 4.24 | 77 / 133 / 109 / 90 s | 4/45 |
+| qwen3.5:4b engineered | 0/9† · 9/9 · 9/9 | 1.00† / 4.24 | 24† / 92 / 56 / 87 s | 5/45 |
+
+† Degenerate: under the enhance schema qwen emits a grammar-valid EMPTY array `[]` in
+~23 s — the "Let Me Speak Freely" failure mode in its purest form. Schema constraint on
+the synthesis-heavy task destroys qwen and mildly *helps* llama (2.22 vs 1.67, no example
+leakage since prompts are unchanged). **Harness engineering must be per-task.**
+
+Other findings from this round:
+
+- **The native API path alone is ~4× faster than OpenAI-compat** on identical prompts
+  (llama default enhance 261 s → 64 s, polish 626 s → 167 s, ask 36 s → 11 s). All §3.1
+  local latency numbers are superseded; local Ask at 11 s is genuinely usable.
+- **qwen's empty-Ask problem persists** even with thinking off (4/45 shipped, 5/45
+  engineered, `q03` failing in every shipped run) and did NOT reproduce in isolated
+  replays of the identical request — an unresolved in-batch intermittent. The harness
+  now needs `done_reason` logging on Ask records to diagnose further (not yet added).
+- qwen's judged quality is stable across runs (Enhance 3.00/3.00/3.33) — the §6 result
+  replicates.
+
+### Revised recommendation
+
+**Keep `llama3.1` as the default local model, and ship the engineered harness for it.**
+With per-task `format` schemas + temperature 0 (plumbing already in fly-llm via
+`ChatRequest.format`; the app's call sites just need to pass the schemas), llama3.1 went
+**27/27 on contracts** with 11-second Ask answers and zero empty responses — it is now the
+most reliable AND fastest local option measured, which matches this product's speed
+requirement. qwen3.5:4b keeps the Enhance quality edge (3.11 vs 2.22) but pays for it
+with 90-second Ask latency, 4/9 polish contracts, and unexplained empty answers — wrong
+trade for a "fast local" mode; its profile entry stays (it's strictly better than
+qwen-with-thinking for anyone who selects it manually).
+
+**On closing the quality gap to sonnet-5** (Enhance 2.22 vs reference): harness
+engineering closes the *reliability and speed* gaps but not the *comprehension* gap —
+spoken-number corruption and shallow synthesis survive every technique probed (§7.1).
+Remaining levers, in order of cost: (a) two-pass Enhance (extract facts → compose notes
+from the facts — unmeasured, worth one bench variant); (b) retrieval-style Ask for very
+long meetings (top-k relevant segments instead of full-transcript stuffing); (c) the
+fine-tune/distill route — precedents exist (DeepSeek-R1-distill-Llama-8B; community
+meeting-summary LoRAs like UDZH/deepseek-meeting-summary), so distilling sonnet-5
+meeting-notes outputs into a llama3.1 LoRA published on HF is viable, but it's a separate
+effort with dataset, eval, and licensing work — only justified if (a)+(b) leave the gap
+unacceptable.
+
+## 11. Reproducing
 
 ```
 # 1) reference outputs (needs the Anthropic key in env or the app keychain)
