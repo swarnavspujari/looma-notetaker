@@ -130,7 +130,15 @@ fn fixture_meeting(spec: &FixtureSpec, meeting_id: &str) -> Meeting {
         id: meeting_id.to_string(),
         title: spec.meeting_title.clone(),
         note_id: format!("bench-note-{}", spec.id),
-        attendees: spec.attendees.clone(),
+        attendees: spec
+            .attendees
+            .iter()
+            .map(|name| fly_core::Attendee {
+                name: name.clone(),
+                email: None,
+            })
+            .collect(),
+        attendees_confirmed: false,
         started_at: "2026-07-01T17:00:00Z".parse().unwrap(),
         ended_at: None,
         recording: None,

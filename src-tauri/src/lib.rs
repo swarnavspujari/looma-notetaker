@@ -59,7 +59,30 @@ pub fn run() {
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
                 app.handle().plugin(tauri_plugin_process::init())?;
             }
-            let app_state = state::AppState::init()?;
+            // A failed storage open must NEVER be a silent flash-crash: the
+            // window closes before the user can read anything and it looks
+            // like the app is broken (seen in the wild with a database that
+            // was replaced under a live connection). Tell them what happened
+            // and that their data folder is intact, then exit cleanly.
+            let app_state = match state::AppState::init() {
+                Ok(s) => s,
+                Err(e) => {
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    tracing::error!(error = %e, "storage failed to open");
+                    app.dialog()
+                        .message(format!(
+                            "Fly on the Wall couldn't open its database:\n\n{e}\n\n\
+                             Your recordings, notes, and transcripts are separate \
+                             files and are intact in the app data folder. Close any \
+                             other program that may be using the database (or restore \
+                             a backup of flyonthewall.db) and start the app again."
+                        ))
+                        .kind(MessageDialogKind::Error)
+                        .title("Fly on the Wall can't start")
+                        .blocking_show();
+                    std::process::exit(1);
+                }
+            };
             // Let the webview stream recordings from the data dir so the editor's
             // audio player can embed & scrub them (asset protocol).
             let _ = app
@@ -74,6 +97,31 @@ pub fn run() {
                     let _ = tauri::async_runtime::spawn_blocking(move || {
                         let state = handle.state::<state::AppState>();
                         hw::detect_and_cache(&state.storage.lock().unwrap());
+                    })
+                    .await;
+                });
+            }
+            // Recording self-heal: re-attach (or fully resurrect) finished
+            // recordings whose database write was lost — the manifests written
+            // at stop time make this possible even after the database itself
+            // was replaced. Off the startup path; a healthy install no-ops.
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ = tauri::async_runtime::spawn_blocking(move || {
+                        let state = handle.state::<state::AppState>();
+                        let storage = state.storage.lock().unwrap();
+                        match storage.self_heal_recordings() {
+                            Ok(r) if !r.is_empty() => tracing::info!(
+                                attached = r.attached.len(),
+                                resurrected = r.resurrected.len(),
+                                "recording self-heal repaired meetings"
+                            ),
+                            Ok(_) => {}
+                            Err(e) => {
+                                tracing::warn!(error = %e, "recording self-heal failed")
+                            }
+                        }
                     })
                     .await;
                 });
@@ -122,6 +170,10 @@ pub fn run() {
             asr_commands::get_cleaned_transcript,
             asr_commands::relabel_speaker,
             asr_commands::edit_transcript_segment,
+            asr_commands::update_meeting_attendees,
+            asr_commands::re_diarize_meeting,
+            asr_commands::revert_speaker_assignment,
+            asr_commands::speaker_undo_state,
             asr_commands::pipeline_stage,
             asr_commands::get_asr_settings,
             asr_commands::set_asr_settings,
@@ -152,6 +204,7 @@ pub fn run() {
             screen_commands::screen_status,
             screen_commands::start_screen_recording,
             screen_commands::stop_screen_recording,
+            screen_commands::ensure_video_thumbnail,
             import_commands::import_media,
         ])
         .build(tauri::generate_context!())
