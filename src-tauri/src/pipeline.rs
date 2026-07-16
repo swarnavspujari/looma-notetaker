@@ -354,15 +354,58 @@ pub async fn run_with(
                 }),
                 Some(model_id),
             ),
-            None => GuardedAsr::single(Box::new(fly_asr::whisper_cpp::WhisperCppEngine {
-                exe: whisper_exe,
-                model: model_path,
-                threads,
-                // On a GPU-capable build (Metal on macOS) honor the off
-                // switch; the Windows CPU build has no GPU backend and
-                // ignores it.
-                force_cpu: !use_gpu,
-            })),
+            None => {
+                // macOS: whisper.cpp defaults to Metal, and on GPUs Metal
+                // can't actually serve (e.g. Intel-era Macs, where ggml's
+                // Metal init aborts with SIGABRT) that crash must not sink
+                // the meeting. Run Metal as a guarded primary with a
+                // forced-CPU fallback — mirroring the Windows Vulkan guard —
+                // and honor a prior runtime-failure pin so later meetings
+                // skip the doomed Metal attempt entirely (toggling the
+                // Settings switch off→on clears the pin, same as Windows).
+                #[cfg(target_os = "macos")]
+                {
+                    let pinned_cpu = {
+                        let storage = state.storage.lock().unwrap();
+                        gpu::stored(&storage)
+                            .is_some_and(|b| b.verdict == "cpu" && b.model_id == model_id)
+                    };
+                    if use_gpu && !pinned_cpu {
+                        GuardedAsr::with_cpu_fallback(
+                            Box::new(fly_asr::whisper_cpp::WhisperCppEngine {
+                                exe: whisper_exe.clone(),
+                                model: model_path.clone(),
+                                threads,
+                                force_cpu: false,
+                            }),
+                            "whisper.cpp-metal",
+                            Box::new(fly_asr::whisper_cpp::WhisperCppEngine {
+                                exe: whisper_exe,
+                                model: model_path,
+                                threads,
+                                force_cpu: true,
+                            }),
+                            Some(model_id),
+                        )
+                    } else {
+                        GuardedAsr::single(Box::new(fly_asr::whisper_cpp::WhisperCppEngine {
+                            exe: whisper_exe,
+                            model: model_path,
+                            threads,
+                            force_cpu: true,
+                        }))
+                    }
+                }
+                #[cfg(not(target_os = "macos"))]
+                GuardedAsr::single(Box::new(fly_asr::whisper_cpp::WhisperCppEngine {
+                    exe: whisper_exe,
+                    model: model_path,
+                    threads,
+                    // On a GPU-capable build honor the off switch; the
+                    // Windows CPU build has no GPU backend and ignores it.
+                    force_cpu: !use_gpu,
+                }))
+            }
         }
     };
     let diarizer = fly_diarize::sherpa::SherpaDiarizeEngine {
