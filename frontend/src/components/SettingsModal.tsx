@@ -775,8 +775,8 @@ export default function SettingsModal({
           <section className="space-y-3">
             <SectionLabel>Transcription model</SectionLabel>
             <p className="text-text-3" style={{ fontSize: 11, lineHeight: 1.5 }}>
-              A specific choice here overrides the Hardware tier and “Maximum quality” settings
-              above. “Auto (per tier)” uses the tier’s default.
+              A specific choice here overrides the Hardware tier and “Maximum quality” settings.
+              “Auto (per tier)” uses the tier’s default.
             </p>
             <Select
               style={{ maxWidth: "20rem" }}
