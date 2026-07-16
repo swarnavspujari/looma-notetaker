@@ -72,6 +72,7 @@ export const api = {
   ensureVideoThumbnail: (relPath: string) => invoke<string>("ensure_video_thumbnail", { relPath }),
   revealAttachment: (relPath: string) => invoke<void>("reveal_attachment", { relPath }),
   revealDataDir: () => invoke<void>("reveal_data_dir"),
+  revealLogsDir: () => invoke<void>("reveal_logs_dir"),
   mcpConfig: () => invoke<string>("mcp_config"),
   getAppSetting: (key: string) => invoke<string | null>("get_app_setting", { key }),
   setAppSetting: (key: string, value: string) => invoke<void>("set_app_setting", { key, value }),

@@ -1579,6 +1579,22 @@ export default function SettingsModal({
           </Card>
         </section>
 
+        {/* Diagnostics (Technical) — where the rolling log files live */}
+        {technical && (
+          <section className="flex items-center justify-between gap-3">
+            <div>
+              <SectionLabel>Diagnostics</SectionLabel>
+              <p className="text-text-3" style={{ margin: 0, fontSize: 11, lineHeight: 1.5 }}>
+                The app writes local log files (last few days) for troubleshooting. Nothing leaves
+                this machine.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => void api.revealLogsDir()}>
+              Open logs folder
+            </Button>
+          </section>
+        )}
+
         {/* App updates */}
         <section className="space-y-2">
           {updater.supported ? (

@@ -594,6 +594,8 @@ function handle(cmd: string, args: Record<string, unknown> = {}): unknown {
       return null;
     case "download_model":
       return "";
+    case "reveal_logs_dir":
+      return null;
     case "export_note":
       return "C:\\Users\\you\\Desktop\\note.md";
     case "ensure_video_thumbnail":
