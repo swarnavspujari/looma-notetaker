@@ -46,6 +46,16 @@ impl TranscriptionEngine for WhisperCppEngine {
     }
 
     async fn transcribe(&self, wav_path: &Path, opts: &TranscribeOptions) -> Result<RawTranscript> {
+        self.transcribe_with_progress(wav_path, opts, &|_| {})
+            .await
+    }
+
+    async fn transcribe_with_progress(
+        &self,
+        wav_path: &Path,
+        opts: &TranscribeOptions,
+        on_progress: crate::TranscribeProgressFn<'_>,
+    ) -> Result<RawTranscript> {
         if !self.model.exists() {
             return Err(AsrError::ModelMissing(self.model.display().to_string()));
         }
@@ -56,17 +66,24 @@ impl TranscriptionEngine for WhisperCppEngine {
         let (samples, rate) = fly_audio::mix::read_wav_mono(wav_path)
             .map_err(|e| AsrError::BadAudio(format!("{}: {e}", wav_path.display())))?;
         let spans = detect_speech_spans(&samples, rate, &VadConfig::default());
+        let total_speech_ms: u64 = spans.iter().map(|s| s.end_ms - s.start_ms).sum();
         tracing::debug!(
             file = %wav_path.display(),
             spans = spans.len(),
-            speech_ms = spans.iter().map(|s| s.end_ms - s.start_ms).sum::<u64>(),
+            speech_ms = total_speech_ms,
             total_ms = samples.len() as u64 * 1000 / rate.max(1) as u64,
             "vad segmentation"
         );
 
         let mut words = Vec::new();
         let mut language = None;
+        let mut done_speech_ms: u64 = 0;
+        on_progress(crate::TranscribeProgress {
+            done_ms: 0,
+            total_ms: total_speech_ms,
+        });
         for batch in plan_batches(&spans, MAX_BATCH_SPEECH_MS) {
+            let batch_ms: u64 = batch.iter().map(|s| s.end_ms - s.start_ms).sum();
             let (mut chunk, map) = stitch_spans(&samples, rate, &batch)
                 .map_err(|e| AsrError::BadAudio(e.to_string()))?;
             fly_audio::mix::normalize_peak(&mut chunk, NORMALIZE_TARGET_PEAK, NORMALIZE_MAX_GAIN);
@@ -77,6 +94,11 @@ impl TranscriptionEngine for WhisperCppEngine {
                 w.end_ms = map_to_original(w.end_ms, &map);
                 w
             }));
+            done_speech_ms += batch_ms;
+            on_progress(crate::TranscribeProgress {
+                done_ms: done_speech_ms,
+                total_ms: total_speech_ms,
+            });
         }
 
         Ok(RawTranscript {
