@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Plus } from "lucide-react";
 import { api } from "../api";
 import type {
@@ -31,8 +31,15 @@ interface Props {
   updater: Updater;
   recordingActive: boolean;
   appVersion: string | null;
+  /** When "engine", open straight to Technical view scrolled to the
+   *  transcription-engine row (deep-link from the transcribe error). */
+  initialFocus?: "engine" | null;
   onClose: () => void;
 }
+
+/** Managed-artifact id for the whisper.cpp engine (mirrors
+ *  models::WHISPER_ENGINE_ID in the backend). */
+const WHISPER_ENGINE_ID = "whisper-bin";
 
 const TIERS = [
   { id: "light", label: "Light", desc: "Whisper small (Q5) — ~2 GB RAM, fine on old laptops" },
@@ -177,6 +184,7 @@ export default function SettingsModal({
   updater,
   recordingActive,
   appVersion,
+  initialFocus = null,
   onClose,
 }: Props) {
   const [settings, setSettings] = useState<AsrSettings | null>(null);
@@ -194,7 +202,18 @@ export default function SettingsModal({
   const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
 
   // Presentational view mode — Technical reveals model installs, GPU + OAuth details.
-  const [technical, setTechnical] = useState(false);
+  // A deep-link to the engine row forces Technical so the row is visible.
+  const [technical, setTechnical] = useState(initialFocus === "engine");
+  const engineRowRef = useRef<HTMLDivElement>(null);
+  const didFocusRef = useRef(false);
+  // Deep-link: once settings have loaded (row is rendered), scroll it into
+  // view a single time — not on every later refresh (e.g. post-install).
+  useEffect(() => {
+    if (initialFocus === "engine" && settings && !didFocusRef.current) {
+      didFocusRef.current = true;
+      engineRowRef.current?.scrollIntoView({ block: "center" });
+    }
+  }, [initialFocus, settings]);
   // Appearance control (System / Light / Dark) — wired to the shared theme hook.
   const { theme, setTheme } = useTheme();
 
@@ -568,7 +587,20 @@ export default function SettingsModal({
   };
 
   const asrModels = settings?.models.filter((m) => m.id.startsWith("ggml-")) ?? [];
-  const otherModels = settings?.models.filter((m) => !m.id.startsWith("ggml-")) ?? [];
+  // The whisper.cpp engine (and its GPU variant) get a dedicated, friendlier
+  // "Transcription engine" row below instead of a cryptic binary entry here.
+  const otherModels =
+    settings?.models.filter(
+      (m) => !m.id.startsWith("ggml-") && !m.id.startsWith("whisper-bin"),
+    ) ?? [];
+  const engineInstalling = downloading === WHISPER_ENGINE_ID;
+  const engineProg =
+    engineInstalling && modelProgress?.id === WHISPER_ENGINE_ID && modelProgress.total > 0
+      ? modelProgress
+      : null;
+  const enginePct = engineProg
+    ? Math.round((engineProg.downloaded / engineProg.total) * 100)
+    : 0;
 
   const groqHasKey = !!settings?.has_groq_key || !!groqKey;
   const showGroqCard = tier === "cloud" || useGroq;
@@ -803,6 +835,72 @@ export default function SettingsModal({
           <section className="space-y-2">
             <SectionLabel>Models</SectionLabel>
             <div>
+              {/* Transcription engine — the whisper.cpp binary that actually
+                  runs the weights below. Weights alone can't transcribe, so its
+                  state is surfaced explicitly rather than failing at run time. */}
+              {settings && (
+                <div
+                  ref={engineRowRef}
+                  className="flex items-center justify-between gap-3 border-t border-line-2 py-2"
+                >
+                  <div className="min-w-0">
+                    <div
+                      className="truncate text-text"
+                      style={{ fontFamily: "var(--font-mono)", fontSize: "12.5px" }}
+                    >
+                      Transcription engine (whisper.cpp)
+                    </div>
+                    <div className="text-text-3" style={{ fontSize: 11, lineHeight: 1.5 }}>
+                      {settings.engine_installed
+                        ? "Installed — runs the models above on this machine."
+                        : settings.engine_managed
+                          ? "Required to transcribe. Downloaded weights can't run without it."
+                          : "Required to transcribe. Install whisper.cpp yourself — macOS: brew install whisper-cpp; Linux: your package manager or build from source."}
+                    </div>
+                    {downloadErrors[WHISPER_ENGINE_ID] && (
+                      <div style={{ fontSize: 11, color: "var(--error-text)" }}>
+                        {downloadErrors[WHISPER_ENGINE_ID]}
+                      </div>
+                    )}
+                  </div>
+                  <span className="flex shrink-0 items-center gap-2">
+                    {settings.engine_installed ? (
+                      <Badge tone="success" dot>
+                        ready
+                      </Badge>
+                    ) : engineInstalling ? (
+                      engineProg ? (
+                        <span className="flex items-center gap-2">
+                          <ProgressBar value={enginePct} style={{ width: 96 }} />
+                          <span
+                            className="text-text-3"
+                            style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}
+                          >
+                            {enginePct}%
+                          </span>
+                        </span>
+                      ) : (
+                        <span
+                          className="text-text-3"
+                          style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}
+                        >
+                          downloading…
+                        </span>
+                      )
+                    ) : settings.engine_managed ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void download(WHISPER_ENGINE_ID)}
+                      >
+                        Install
+                      </Button>
+                    ) : (
+                      <Badge tone="warning">missing</Badge>
+                    )}
+                  </span>
+                </div>
+              )}
               {[...asrModels, ...otherModels].map((m) => {
                 const prog =
                   downloading === m.id &&

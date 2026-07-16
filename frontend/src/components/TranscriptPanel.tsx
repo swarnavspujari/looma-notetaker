@@ -16,9 +16,19 @@ interface Props {
   stageDetail: string | null;
   modelProgress: ModelProgress | null;
   pipelineError: string | null;
+  /** whisper-cli engine readiness — null until the first settings fetch. When
+   *  a transcribe fails and the engine isn't installed, the error turns into an
+   *  actionable install/setup prompt instead of a raw message. */
+  engine: { installed: boolean; managed: boolean } | null;
+  /** True while an in-app engine install is streaming. */
+  engineInstalling: boolean;
   /** Zoom-in: segment ids to highlight + scroll to (AI block sources). */
   highlightIds: string[];
   onTranscribe: () => void;
+  /** Install the whisper.cpp engine in-app (only meaningful when engine.managed). */
+  onInstallEngine: () => void;
+  /** Open Settings deep-linked to the transcription-engine row. */
+  onOpenSettings: () => void;
   onRelabel: (speakerKey: string, label: string) => void;
   /** "Someone else…" in the speaker dropdown: adds a new attendee AND
    *  assigns them to the speaker in one step. */
@@ -32,6 +42,9 @@ interface Props {
 export function isGenericLabel(key: string, label: string): boolean {
   return label === key || label === "Unknown" || /^Speaker \d+$/.test(label);
 }
+
+/** Managed-artifact id for the whisper.cpp engine (mirrors the backend). */
+const WHISPER_ENGINE_ID = "whisper-bin";
 
 const STAGE_LABELS: Record<string, string> = {
   waiting: "Waiting to transcribe (recording comes first)…",
@@ -209,6 +222,125 @@ function SpeakerMenu({
   );
 }
 
+/** Actionable replacement for the raw "whisper-cli is not installed" error:
+ *  explains the engine-vs-weights distinction and offers a one-click install
+ *  (when the OS can manage it) plus a Settings deep-link. Falls back to manual
+ *  guidance where no managed binary exists yet (macOS/Linux pre-hosting). */
+function EngineMissingNotice({
+  engine,
+  installing,
+  installPct,
+  onInstall,
+  onOpenSettings,
+}: {
+  engine: { installed: boolean; managed: boolean };
+  installing: boolean;
+  installPct: number | null;
+  onInstall: () => void;
+  onOpenSettings: () => void;
+}) {
+  return (
+    <div
+      className="mt-2 rounded-lg border border-line px-3 py-2.5 text-[13px]"
+      style={{ background: "var(--error-soft)", color: "var(--error-text)" }}
+      role="alert"
+    >
+      <div className="font-semibold">Transcription engine not installed</div>
+      <div className="mt-1" style={{ lineHeight: 1.5 }}>
+        Your recording and the downloaded model are ready, but the whisper.cpp engine
+        that runs them isn&apos;t installed yet. It runs fully on this machine — nothing
+        is uploaded.
+      </div>
+      {installing ? (
+        <div className="mt-2 flex items-center gap-2">
+          {installPct !== null ? (
+            <>
+              <ProgressBar value={installPct} style={{ width: 140 }} />
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>{installPct}%</span>
+            </>
+          ) : (
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11 }}>installing…</span>
+          )}
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {engine.managed && (
+            <Button variant="primary" size="sm" onClick={onInstall}>
+              Install engine
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={onOpenSettings}>
+            Set up in Settings
+          </Button>
+        </div>
+      )}
+      {!engine.managed && !installing && (
+        <div className="mt-2" style={{ fontSize: 12, lineHeight: 1.5 }}>
+          Or install it yourself — macOS:{" "}
+          <code style={{ fontFamily: "var(--font-mono)" }}>brew install whisper-cpp</code>. Then
+          transcribe again.
+        </div>
+      )}
+      <GroqHint onOpenSettings={onOpenSettings} />
+    </div>
+  );
+}
+
+/** Shared footer: the cloud escape hatch, with its privacy trade-off named. */
+function GroqHint({ onOpenSettings }: { onOpenSettings: () => void }) {
+  return (
+    <div className="mt-2" style={{ fontSize: 12, lineHeight: 1.5 }}>
+      Or use{" "}
+      <span
+        role="button"
+        className="cursor-pointer underline"
+        onClick={onOpenSettings}
+      >
+        Groq cloud transcription
+      </span>{" "}
+      (Settings) — works without local models, but audio leaves this machine.
+    </div>
+  );
+}
+
+/** Actionable notice for a failed model download (offline, CDN outage): the
+ *  raw error is collapsed to its human part (signed CDN URLs can be hundreds
+ *  of characters) and paired with a retry, a Settings deep-link, and the
+ *  Groq escape hatch. */
+function DownloadFailedNotice({
+  error,
+  onRetry,
+  onOpenSettings,
+}: {
+  error: string;
+  onRetry: () => void;
+  onOpenSettings: () => void;
+}) {
+  const brief = error.replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim();
+  const shown = brief.length > 260 ? `${brief.slice(0, 260)}…` : brief;
+  return (
+    <div
+      className="mt-2 rounded-lg border border-line px-3 py-2.5 text-[13px]"
+      style={{ background: "var(--error-soft)", color: "var(--error-text)" }}
+      role="alert"
+    >
+      <div className="font-semibold">Model download failed</div>
+      <div className="mt-1" style={{ lineHeight: 1.5 }}>
+        {shown}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <Button variant="primary" size="sm" onClick={onRetry}>
+          Try again
+        </Button>
+        <Button variant="outline" size="sm" onClick={onOpenSettings}>
+          Set up in Settings
+        </Button>
+      </div>
+      <GroqHint onOpenSettings={onOpenSettings} />
+    </div>
+  );
+}
+
 export default function TranscriptPanel({
   meeting,
   transcript,
@@ -217,8 +349,12 @@ export default function TranscriptPanel({
   stageDetail,
   modelProgress,
   pipelineError,
+  engine,
+  engineInstalling,
   highlightIds,
   onTranscribe,
+  onInstallEngine,
+  onOpenSettings,
   onRelabel,
   onAssignNewAttendee,
   onEditSegment,
@@ -239,6 +375,20 @@ export default function TranscriptPanel({
     modelProgress && modelProgress.stage === "downloading" && modelProgress.total > 0
       ? Math.round((modelProgress.downloaded / modelProgress.total) * 100)
       : null;
+
+  // The actionable case: a transcribe failed (or an install is streaming) AND
+  // the whisper-cli engine isn't resolvable — turn the raw error into an
+  // install/setup prompt. `engine` is null only until the first settings load.
+  const engineMissing = (!!pipelineError || engineInstalling) && !!engine && !engine.installed;
+  // A model download that failed (offline, CDN outage) with the engine fine —
+  // same actionable treatment instead of a raw error string.
+  const downloadFailed =
+    !engineMissing && !!pipelineError && /download (failed|interrupted)/i.test(pipelineError);
+  const installPct =
+    modelProgress && modelProgress.id === WHISPER_ENGINE_ID && modelProgress.total > 0
+      ? Math.round((modelProgress.downloaded / modelProgress.total) * 100)
+      : null;
+
   const stageBanner = stage ? (
     <div
       className="print:hidden mb-4 rounded-lg border px-3.5 py-3"
@@ -294,13 +444,29 @@ export default function TranscriptPanel({
             Runs fully on this machine — audio never leaves your computer.
           </span>
         </div>
-        {pipelineError && (
-          <div
-            className="mt-2 rounded-lg border border-line px-3 py-2 text-[13px]"
-            style={{ background: "var(--error-soft)", color: "var(--error-text)" }}
-          >
-            {pipelineError}
-          </div>
+        {engineMissing ? (
+          <EngineMissingNotice
+            engine={engine!}
+            installing={engineInstalling}
+            installPct={installPct}
+            onInstall={onInstallEngine}
+            onOpenSettings={onOpenSettings}
+          />
+        ) : downloadFailed ? (
+          <DownloadFailedNotice
+            error={pipelineError!}
+            onRetry={onTranscribe}
+            onOpenSettings={onOpenSettings}
+          />
+        ) : (
+          pipelineError && (
+            <div
+              className="mt-2 rounded-lg border border-line px-3 py-2 text-[13px]"
+              style={{ background: "var(--error-soft)", color: "var(--error-text)" }}
+            >
+              {pipelineError}
+            </div>
+          )
         )}
       </div>
     );

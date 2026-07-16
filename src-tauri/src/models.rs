@@ -211,6 +211,26 @@ pub fn artifact(id: &str) -> Option<&'static Artifact> {
     registry().find(|a| a.id == id)
 }
 
+/// Artifact id for the whisper.cpp engine and the executable name(s) to look
+/// for on PATH. Kept here so readiness checks and the transcription pipeline
+/// resolve the exact same binary.
+pub const WHISPER_ENGINE_ID: &str = "whisper-bin";
+pub const WHISPER_CLI_NAMES: &[&str] = &["whisper-cli"];
+
+/// True when a tool binary is already usable without downloading anything — a
+/// managed install (this OS ships an artifact for it) or the same tool on
+/// PATH. This is the non-downloading half of `ensure_tool`, used to report
+/// engine readiness to the UI so weights-present-but-engine-missing is a
+/// visible state rather than a transcribe-time surprise.
+pub fn tool_installed(data_dir: &Path, id: &str, path_names: &[&str]) -> bool {
+    if let Some(a) = artifact(id) {
+        if installed_path(data_dir, a).is_some() {
+            return true;
+        }
+    }
+    find_on_path(path_names).is_some()
+}
+
 /// Locate an executable on PATH (used where upstream publishes no binary for
 /// this OS — e.g. whisper-cli and ffmpeg on macOS, whisper-cli on Linux).
 pub fn find_on_path(names: &[&str]) -> Option<PathBuf> {
@@ -742,5 +762,37 @@ mod tests {
         }
         let (id, _) = best_installed_asr_model(tmp.path()).unwrap();
         assert_eq!(id, "ggml-large-v3-q5_0");
+    }
+
+    /// A managed install (probe file present) reports ready even when the tool
+    /// is nowhere on PATH — this is the branch that distinguishes a real,
+    /// runnable engine from bare weights.
+    #[test]
+    fn tool_installed_sees_managed_probe() {
+        let tmp = tempfile::tempdir().unwrap();
+        // sherpa-bin exists in TOOLS on every OS; fabricate its probe file.
+        let a = artifact("sherpa-bin").expect("sherpa-bin artifact");
+        let probe = tmp.path().join(a.probe_rel);
+        std::fs::create_dir_all(probe.parent().unwrap()).unwrap();
+        std::fs::write(&probe, b"x").unwrap();
+        // A name that won't resolve on PATH, so this asserts the managed hit only.
+        assert!(tool_installed(
+            tmp.path(),
+            "sherpa-bin",
+            &["fly-nonexistent-binary-xyz"]
+        ));
+    }
+
+    /// No managed artifact and nothing on PATH → not installed. This is the
+    /// macOS/Linux state that must surface as "engine missing" rather than a
+    /// transcribe-time crash.
+    #[test]
+    fn tool_installed_false_when_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(!tool_installed(
+            tmp.path(),
+            "fly-unknown-artifact",
+            &["fly-nonexistent-binary-xyz"]
+        ));
     }
 }
