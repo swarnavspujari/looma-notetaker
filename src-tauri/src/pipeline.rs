@@ -278,7 +278,12 @@ pub async fn run_with(
                 exe,
                 model,
                 threads,
-                force_cpu: local_fallback_force_cpu(use_gpu, pinned_cpu),
+                // macOS additionally forces CPU even before any pin exists:
+                // an unpinned machine may be exactly the one whose Metal
+                // init aborts, and this rescue path is where reliability
+                // beats speed.
+                force_cpu: cfg!(target_os = "macos")
+                    || local_fallback_force_cpu(use_gpu, pinned_cpu),
             })
         }
         .await;
