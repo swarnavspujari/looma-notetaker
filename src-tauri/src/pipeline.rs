@@ -260,6 +260,10 @@ pub async fn run_with(
         // be ensured (e.g. offline), Groq still runs alone.
         let model_id = model_override
             .unwrap_or_else(|| hw::default_model_for_tier(&tier, max_quality).to_string());
+        let pinned_cpu = {
+            let storage = state.storage.lock().unwrap();
+            cpu_pinned_for_model(&storage, &model_id)
+        };
         let local = async {
             let exe = models::ensure_tool(
                 on_model,
@@ -274,7 +278,7 @@ pub async fn run_with(
                 exe,
                 model,
                 threads,
-                force_cpu: !use_gpu,
+                force_cpu: local_fallback_force_cpu(use_gpu, pinned_cpu),
             })
         }
         .await;
@@ -355,9 +359,9 @@ pub async fn run_with(
                 Some(model_id),
             ),
             None => {
-                // macOS: whisper.cpp defaults to Metal, and on GPUs Metal
-                // can't actually serve (e.g. Intel-era Macs, where ggml's
-                // Metal init aborts with SIGABRT) that crash must not sink
+                // macOS: whisper.cpp defaults to Metal, and on GPUs that
+                // Metal can't actually serve (e.g. Intel-era Macs) ggml's
+                // Metal init aborts with SIGABRT — that crash must not sink
                 // the meeting. Run Metal as a guarded primary with a
                 // forced-CPU fallback — mirroring the Windows Vulkan guard —
                 // and honor a prior runtime-failure pin so later meetings
@@ -367,8 +371,7 @@ pub async fn run_with(
                 {
                     let pinned_cpu = {
                         let storage = state.storage.lock().unwrap();
-                        gpu::stored(&storage)
-                            .is_some_and(|b| b.verdict == "cpu" && b.model_id == model_id)
+                        cpu_pinned_for_model(&storage, &model_id)
                     };
                     if use_gpu && !pinned_cpu {
                         GuardedAsr::with_cpu_fallback(
@@ -886,6 +889,24 @@ impl GuardedAsr {
     }
 }
 
+/// Whether a stored GPU verdict pins this machine (and model) to CPU — a
+/// benchmark that measured CPU faster, or a recorded GPU runtime failure
+/// (e.g. the macOS Metal abort). Invalidated by a model change, like the
+/// verdict itself.
+fn cpu_pinned_for_model(storage: &fly_storage::Storage, model_id: &str) -> bool {
+    gpu::stored(storage).is_some_and(|b| b.verdict == "cpu" && b.model_id == model_id)
+}
+
+/// `force_cpu` for the local engine backing the Groq cloud fallback. It is
+/// the last engine in the chain — nothing rescues the meeting if it crashes
+/// — so besides the GPU switch it honors a stored CPU pin: a Groq outage
+/// must never land on an engine already known to abort on this machine's
+/// GPU. Harmless where the resolved whisper-bin is the CPU build (Windows),
+/// which ignores `-ng`.
+fn local_fallback_force_cpu(gpu_setting_on: bool, pinned_cpu: bool) -> bool {
+    !gpu_setting_on || pinned_cpu
+}
+
 /// Recovery for a meeting folder wrongly parked under `recordings/_unlinked/`:
 /// if the folder `recording_json` points at is missing but a folder with the
 /// same name sits in `_unlinked/`, move it back. Returns whether a restore
@@ -1104,6 +1125,35 @@ mod tests {
             notes[0].contains("Cloud transcription failed"),
             "user-visible detail should name the cloud, got: {notes:?}"
         );
+    }
+
+    /// A stored CPU pin (benchmark verdict or recorded Metal runtime
+    /// failure) must force the Groq-fallback local engine onto CPU: it is
+    /// the last engine in the chain, so a doomed GPU attempt there would
+    /// sink the meeting a Groq outage already put at risk.
+    #[test]
+    fn pinned_cpu_verdict_forces_cpu_on_groq_fallback_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = fly_storage::Storage::open(dir.path()).unwrap();
+
+        // No verdict stored — only the GPU switch decides.
+        assert!(!cpu_pinned_for_model(&storage, "small-q5"));
+        assert!(!local_fallback_force_cpu(
+            true,
+            cpu_pinned_for_model(&storage, "small-q5")
+        ));
+        assert!(local_fallback_force_cpu(false, false), "switch off → CPU");
+
+        // A Metal runtime failure pins this machine+model to CPU.
+        gpu::record_runtime_failure(&storage, "small-q5", "ggml_metal_init: error");
+        assert!(cpu_pinned_for_model(&storage, "small-q5"));
+        assert!(local_fallback_force_cpu(
+            true,
+            cpu_pinned_for_model(&storage, "small-q5")
+        ));
+
+        // A different model invalidates the pin (same rule as gpu::plan).
+        assert!(!cpu_pinned_for_model(&storage, "large-v3"));
     }
 
     #[tokio::test]

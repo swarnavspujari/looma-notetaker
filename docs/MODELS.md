@@ -58,11 +58,12 @@ whisper.cpp publishes no Vulkan Windows binary — only CPU/BLAS/CUDA-only — s
 this one is built from the upstream v1.9.1 tag with `-DGGML_VULKAN=1` and
 hosted as a tools release on this repo). **macOS** whisper.cpp builds
 (including brew's, found via PATH) default to Metal already; Metal runs as a
-guarded primary with a forced-CPU (`-ng`) fallback, because on GPUs Metal
-can't serve (e.g. Intel-era Macs) ggml's Metal init aborts — that failure
-falls back to CPU mid-run and pins the machine to CPU like Windows does.
-The live transcript loop always stays on CPU: it runs during capture,
-exactly when the GPU is busy with the call.
+guarded primary with a forced-CPU (`-ng`) fallback, because on GPUs that
+Metal can't serve (e.g. Intel-era Macs) ggml's Metal init aborts — that
+failure falls back to CPU mid-run and pins the machine to CPU like Windows
+does. The live transcript loop always stays on CPU (`-ng` on macOS, the CPU
+build on Windows): it runs during capture, exactly when the GPU is busy
+with the call.
 
 ## Model registry
 

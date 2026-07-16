@@ -129,13 +129,15 @@ async fn run(app: tauri::AppHandle, meeting_id: String, out_dir: PathBuf, stop: 
     // post-meeting only): it runs DURING capture, exactly when the GPU is
     // busy with the video call / screen share, and mid-meeting contention is
     // the one regression this app can't afford. On Windows that means the
-    // CPU whisper build resolved above; on macOS this invocation is
-    // unchanged from what shipped (brew builds default to Metal there).
+    // CPU whisper build resolved above; on macOS whisper.cpp defaults to
+    // Metal, so pass `-ng` to actually keep live decoding on CPU (this also
+    // sidesteps the Metal init abort on GPUs Metal can't serve — see the
+    // guarded fallback in pipeline.rs).
     let engine = fly_asr::whisper_cpp::WhisperCppEngine {
         exe,
         model,
         threads,
-        force_cpu: false,
+        force_cpu: cfg!(target_os = "macos"),
     };
     let _ = app.emit(
         "live:status",
