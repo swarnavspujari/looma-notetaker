@@ -40,45 +40,48 @@ local speaker turns (spec §6.3): "who said what" never depends on the network.
 |---|---|---|---|
 | whisper.cpp CLI (`whisper-cli.exe`, Windows) | v1.9.1 (CPU build) | ~8 MB zip | ASR; the same zip ships `parakeet-cli.exe` for a future Parakeet engine |
 | whisper.cpp CLI (Vulkan GPU, Windows) | v1.9.1 (`GGML_VULKAN=1` build) | ~24 MB zip | optional GPU ASR — one cross-vendor build (NVIDIA/AMD/Intel); see below |
-| whisper.cpp CLI (macOS universal2) | v1.9.1 (static, Metal embedded) | ~8 MB tar.bz2 | ASR — one archive for Intel + Apple Silicon; see "Building the macOS/Linux engine" |
-| whisper.cpp CLI (Linux x64) | v1.9.1 (static, portable CPU) | ~8 MB tar.bz2 | ASR |
+| whisper.cpp CLI (macOS universal) | v1.9.1 (static, Metal embedded) | ~2.4 MB tar.bz2 | ASR — one archive for Intel + Apple Silicon; see "Building the macOS engine" |
 | sherpa-onnx diarization CLI | v1.13.3 | ~19 MB | speaker diarization |
 | ffmpeg | n8.1 (BtbN autobuild, dated tag) | ~79 MB zip | screen capture (gdigrab) + media import conversion |
 
-### Building the macOS/Linux engine
+### Building the macOS engine
 
 Upstream whisper.cpp ships **no** macOS or Linux binary, so those platforms
 historically depended on a `whisper-cli` on `PATH` (e.g. `brew install
 whisper-cpp`) — which most users don't have, producing a dead-end transcribe
-error. To close that, we build the same pinned version ourselves and host it as
-a tools release on the fork, so `ensure_tool` auto-downloads it on first
-transcribe exactly like Windows.
+error. To close that on macOS, the maintainer builds the same pinned commit
+(v1.9.1, `f049fff`) and hosts it as a `tools-whisper-v1.9.1` release on THIS
+repo — the same pattern as the Windows Vulkan build — so `ensure_tool`
+auto-downloads it on first transcribe exactly like Windows.
 
-Reproduce with [`scripts/build-whisper-sidecar.sh`](../scripts/build-whisper-sidecar.sh)
-(needs `git` + `cmake`):
+Maintainer flow (all hosted from this repo, never a fork):
 
-```
-scripts/build-whisper-sidecar.sh macos   # -> dist/whisper-bin-macos-universal2-v1.9.1.tar.bz2
-scripts/build-whisper-sidecar.sh linux   # -> dist/whisper-bin-linux-x64-v1.9.1.tar.bz2
-```
+1. Run the **Build whisper sidecar (macOS)** workflow
+   (`.github/workflows/build-whisper-sidecar.yml`, `workflow_dispatch`) with
+   `create_release` on. It builds via
+   [`scripts/build-whisper-sidecar.sh`](../scripts/build-whisper-sidecar.sh) —
+   a **static** universal (x86_64 + arm64, hard-asserted via `lipo -archs`)
+   binary with Metal embedded, minimum macOS pinned to the app's
+   `minimumSystemVersion` — attaches the tarball to the tools release, and
+   prints the `Artifact` pin (url / sha256 / bytes) in the job summary.
+2. Paste the pin over the placeholder `whisper-bin` entry in the macOS `TOOLS`
+   array in `src-tauri/src/models.rs` (id `whisper-bin`, `probe_rel`
+   `bin/whisper/whisper-cli`).
 
-It builds a **static** binary (single self-contained file — no dylibs to
-bundle), verifies it links only system libraries, packages it flat (archive
-root holds just `whisper-cli`), and prints the SHA-256, byte size, and a
-ready-to-paste `Artifact { .. }`. Then:
+The script also runs locally (`scripts/build-whisper-sidecar.sh macos`, needs
+`git` + `cmake`) for reproducing/verifying the CI artifact byte-for-byte
+pinning: it verifies HEAD equals the pinned commit, checks the binary links
+only system libraries, packages it flat (archive root holds just
+`whisper-cli`), and prints the same pin.
 
-1. Upload each archive to a GitHub release on the fork, tag `tools-whisper-v1.9.1`.
-2. Paste the emitted `Artifact` into the macOS / Linux `TOOLS` array in
-   `src-tauri/src/models.rs` (id `whisper-bin`, `probe_rel` `bin/whisper/whisper-cli`).
-
-Status: the **macOS universal2** engine is built, hosted (`tools-whisper-v1.9.1`),
-and pinned in `models.rs`, so first transcribe auto-downloads it — same as
-Windows. **Linux** is intentionally out of scope here: it keeps resolving a
-`whisper-cli` on `PATH`, and the script already supports building the Linux
-archive whenever someone wants to add that platform (build on Linux, upload,
-paste the emitted `Artifact`). Where no engine is resolvable, the app shows an
-actionable "engine not installed" prompt (Install / Settings) rather than a
-raw error.
+Status: **pending** — the `models.rs` entry ships with a deliberately invalid
+placeholder SHA until the maintainer runs the workflow and pastes the real
+pin, so nothing downloads (fails closed) before the artifact exists. See
+`docs/pr-triage/pr-26-rehost-checklist.md` for the release + smoke-test
+steps. **Linux** stays PATH-resolved (`whisper-cli` on PATH); the script's
+`linux` target exists for whoever adds that platform later. Where no engine
+is resolvable, the app shows an actionable "engine not installed" prompt
+(Install / Settings) rather than a raw error.
 
 ## GPU transcription (post-meeting only)
 

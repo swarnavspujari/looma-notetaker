@@ -1,0 +1,70 @@
+name: Build whisper sidecar (macOS)
+
+# Builds the managed macOS whisper.cpp engine (static, universal x86_64+arm64,
+# Metal embedded) via scripts/build-whisper-sidecar.sh, prints the Artifact
+# pin (url / sha256 / bytes) for src-tauri/src/models.rs, and — only when the
+# `create_release` input is set — uploads the tarball as an asset on a
+# `tools-whisper-v1.9.1` release of THIS repo (same hosting pattern as the
+# Windows Vulkan build's `tools-whisper-vulkan-v1.9.1`). Manual-only: this is
+# a maintainer tool, not part of CI.
+on:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: "Create/update the tools-whisper-v1.9.1 release and attach the tarball (otherwise the tarball is only a run artifact)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build & pin (macOS universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # git + cmake + Xcode CLTs are preinstalled on GitHub's macOS runners.
+      - name: Build whisper-cli (static universal, Metal embedded)
+        run: bash scripts/build-whisper-sidecar.sh macos
+
+      # The script already printed the ready-to-paste Artifact { .. }; repeat
+      # the raw pin in the step summary so it survives log expiry.
+      - name: Emit Artifact pin to the job summary
+        run: |
+          ASSET=(dist/whisper-bin-macos-universal2-*.tar.bz2)
+          SHA=$(shasum -a 256 "${ASSET[0]}" | awk '{print $1}')
+          BYTES=$(wc -c < "${ASSET[0]}" | tr -d ' ')
+          {
+            echo "### Artifact pin for src-tauri/src/models.rs"
+            echo '```'
+            echo "asset:  $(basename "${ASSET[0]}")"
+            echo "sha256: ${SHA}"
+            echo "bytes:  ${BYTES}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload tarball as run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-bin-macos-universal2
+          path: dist/whisper-bin-macos-universal2-*.tar.bz2
+          if-no-files-found: error
+
+      - name: Attach to tools release
+        if: inputs.create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: tools-whisper-v1.9.1
+          name: "tools: whisper.cpp v1.9.1 (macOS engine)"
+          body: |
+            Managed macOS whisper.cpp engine for Fly on the Wall — static,
+            universal (x86_64 + arm64), Metal embedded, built from the pinned
+            v1.9.1 commit by the build-whisper-sidecar workflow. Downloaded on
+            first transcribe and verified against the SHA-256 pin in
+            `src-tauri/src/models.rs`. Not a user-facing app release.
+          draft: false
+          prerelease: false
+          files: dist/whisper-bin-macos-universal2-*.tar.bz2
+          fail_on_unmatched_files: true

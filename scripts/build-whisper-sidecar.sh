@@ -28,8 +28,17 @@ set -euo pipefail
 
 # Pinned to match the Windows whisper artifact in src-tauri/src/models.rs, so
 # transcription behaves identically across platforms. Bump both together.
+# The COMMIT is the source of truth (tags can be moved; commits can't) — it is
+# v1.9.1's commit, the same one the Windows Vulkan build notes (f049fff).
 WHISPER_TAG="v1.9.1"
+WHISPER_COMMIT="f049fff95a089aa9969deb009cdd4892b3e74916"
 REPO="https://github.com/ggml-org/whisper.cpp.git"
+
+# Oldest macOS the app supports (tauri.conf.json bundle.macOS
+# minimumSystemVersion). Without this the binary inherits the BUILD machine's
+# OS as its minimum — a CI runner on macOS 15 would produce a whisper-cli
+# that refuses to launch on the very Intel-era Machines this build targets.
+MACOS_DEPLOYMENT_TARGET="12.0"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${ROOT}/.whisper-build"
@@ -53,15 +62,25 @@ for tool in git cmake; do
   }
 done
 
-echo ">> target=${target}  whisper.cpp=${WHISPER_TAG}"
+echo ">> target=${target}  whisper.cpp=${WHISPER_TAG} (${WHISPER_COMMIT})"
 mkdir -p "${WORK}" "${DIST}"
 
-# Clone (shallow, pinned) or reuse an existing checkout at the right tag.
+# Clone (shallow, by tag) or reuse an existing checkout. Either way the build
+# proceeds only if HEAD is exactly the pinned COMMIT — a moved/reused tag or a
+# stale checkout fails loudly instead of silently building something else.
 if [[ ! -d "${SRC}/.git" ]]; then
   git clone --depth 1 --branch "${WHISPER_TAG}" "${REPO}" "${SRC}"
 else
-  git -C "${SRC}" fetch --depth 1 origin "${WHISPER_TAG}"
-  git -C "${SRC}" checkout -q "${WHISPER_TAG}"
+  # A shallow tag fetch doesn't create a local tag ref, so check out
+  # FETCH_HEAD rather than the tag name (which fails on a reused checkout).
+  git -C "${SRC}" fetch --depth 1 origin "refs/tags/${WHISPER_TAG}"
+  git -C "${SRC}" checkout -q FETCH_HEAD
+fi
+HEAD_COMMIT="$(git -C "${SRC}" rev-parse HEAD)"
+if [[ "${HEAD_COMMIT}" != "${WHISPER_COMMIT}" ]]; then
+  echo "error: checkout is ${HEAD_COMMIT}, expected pinned ${WHISPER_COMMIT}" >&2
+  echo "       (tag ${WHISPER_TAG} no longer points at the pinned commit?)" >&2
+  exit 1
 fi
 
 # Common cmake flags: static libs, only the CLI (no server/tests/examples we
@@ -76,11 +95,15 @@ CMAKE_FLAGS=(
 
 case "${target}" in
   macos)
-    # Universal2 so one archive covers Intel + Apple Silicon (like sherpa's
+    # Universal so one archive covers Intel + Apple Silicon (like sherpa's
     # osx-universal2 build). Metal is on by default; embed its shader library
-    # so the binary needs no sidecar .metal file at runtime.
+    # so the binary needs no sidecar .metal file at runtime. GGML_NATIVE=OFF:
+    # -march=native poisons a universal/cross build — the x86_64 slice must
+    # run on any Intel Mac, not just CPUs like the build machine's.
     CMAKE_FLAGS+=(
-      -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+      -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+      -DCMAKE_OSX_DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET}"
+      -DGGML_NATIVE=OFF
       -DGGML_METAL=ON
       -DGGML_METAL_EMBED_LIBRARY=ON
     )
@@ -109,7 +132,18 @@ BIN="${SRC}/build/bin/whisper-cli"
 echo ">> dynamic dependencies (expect only system libs):"
 if [[ "${target}" == "macos" ]]; then
   otool -L "${BIN}" || true
-  echo ">> architectures:"; lipo -info "${BIN}" || true
+  # HARD assert both slices exist. A single-arch binary here means the
+  # universal flags were dropped (or cmake cached an old configure) and the
+  # archive would brick whichever architecture is missing — the arm64 slice
+  # in particular has never been exercised by anyone yet.
+  ARCHS="$(lipo -archs "${BIN}")"
+  echo ">> architectures: ${ARCHS}"
+  if [[ "${ARCHS}" != "x86_64 arm64" ]]; then
+    echo "error: expected a universal binary ('x86_64 arm64'), got '${ARCHS}'" >&2
+    exit 1
+  fi
+  echo ">> minimum macOS per slice (expect ${MACOS_DEPLOYMENT_TARGET}):"
+  otool -l "${BIN}" | grep -A2 'LC_BUILD_VERSION\|LC_VERSION_MIN' | grep -i 'minos\|version' || true
 else
   ldd "${BIN}" || true
 fi
@@ -141,8 +175,8 @@ echo " SHA-256: ${SHA}"
 echo " Bytes:   ${BYTES}"
 echo "=================================================================="
 echo
-echo " Next steps:"
-echo "  1. Upload ${ASSET} to a GitHub release on the fork,"
+echo " Next steps (normally done by .github/workflows/build-whisper-sidecar.yml):"
+echo "  1. Upload ${ASSET} to a GitHub release on THIS repo,"
 echo "     tag: tools-whisper-${WHISPER_TAG}"
 echo "  2. Paste this into the matching TOOLS array in src-tauri/src/models.rs:"
 echo
@@ -150,7 +184,7 @@ cat <<EOF
     Artifact {
         id: "whisper-bin",
         display: "whisper.cpp CLI (${target}, ${WHISPER_TAG})",
-        url: "https://github.com/<owner>/fly-on-the-wall/releases/download/tools-whisper-${WHISPER_TAG}/${ASSET}",
+        url: "https://github.com/swarnavspujari/fly-on-the-wall/releases/download/tools-whisper-${WHISPER_TAG}/${ASSET}",
         sha256: "${SHA}",
         bytes: ${BYTES},
         kind: ArtifactKind::Archive,

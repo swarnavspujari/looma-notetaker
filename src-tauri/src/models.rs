@@ -36,7 +36,8 @@ pub struct Artifact {
 /// Platform tool binaries. Checksums pinned from upstream release digests
 /// (GitHub asset `digest` fields), same method as the original Windows pins.
 /// whisper.cpp and ffmpeg publish no macOS binaries (and whisper.cpp none for
-/// Linux either) — `ensure_tool` falls back to the same tool on PATH there.
+/// Linux either) — macOS gets a self-built whisper engine hosted on this
+/// repo (below); elsewhere `ensure_tool` falls back to the tool on PATH.
 #[cfg(target_os = "windows")]
 const TOOLS: &[Artifact] = &[
     Artifact {
@@ -128,17 +129,24 @@ const TOOLS: &[Artifact] = &[
 #[cfg(target_os = "macos")]
 const TOOLS: &[Artifact] = &[
     // Upstream whisper.cpp publishes no macOS binary, so we build it ourselves
-    // (static, universal2, Metal embedded — see scripts/build-whisper-sidecar.sh)
-    // and host it as a tools release on the fork. This lets `ensure_tool`
-    // auto-download the engine on first transcribe, exactly like Windows,
-    // instead of requiring a `whisper-cli` on PATH (e.g. `brew install
-    // whisper-cpp`). A brew/PATH build is still honored first when present.
+    // (static, universal, Metal embedded — see scripts/build-whisper-sidecar.sh
+    // and .github/workflows/build-whisper-sidecar.yml) and host it as a tools
+    // release on this repo, like the Windows Vulkan build above. This lets
+    // `ensure_tool` auto-download the engine on first transcribe, exactly like
+    // Windows, instead of requiring a `whisper-cli` on PATH (e.g. `brew
+    // install whisper-cpp`). A brew/PATH build is still honored first.
+    //
+    // MAINTAINER, BEFORE MERGE: run the build-whisper-sidecar workflow
+    // (workflow_dispatch, create_release=true), then replace sha256/bytes
+    // below with the pin it prints. The placeholder is deliberately invalid —
+    // it is not 64 hex chars, so every download fails closed until the real
+    // artifact exists.
     Artifact {
         id: "whisper-bin",
-        display: "whisper.cpp CLI (macOS universal2, v1.9.1)",
-        url: "https://github.com/iansumner/fly-on-the-wall/releases/download/tools-whisper-v1.9.1/whisper-bin-macos-universal2-v1.9.1.tar.bz2",
-        sha256: "93ef2fcc116212ac69866657709a5ce279ae3ecf57c40bbb161528a670014f90",
-        bytes: 2_367_839,
+        display: "whisper.cpp CLI (macOS universal, v1.9.1)",
+        url: "https://github.com/swarnavspujari/fly-on-the-wall/releases/download/tools-whisper-v1.9.1/whisper-bin-macos-universal2-v1.9.1.tar.bz2",
+        sha256: "REPLACE-WITH-WORKFLOW-EMITTED-SHA256-BEFORE-MERGE",
+        bytes: 0,
         kind: ArtifactKind::Archive,
         dest_rel: "bin/whisper",
         probe_rel: "bin/whisper/whisper-cli",
