@@ -164,6 +164,11 @@ top. Nothing in #25 is lost by closing it; credit goes in the close note.
   workflow's emitted pin. MODELS.md corrected (real ~2.4 MB size, Linux row
   removed, honest "pending" status). Steps: `pr-26-rehost-checklist.md`
   (on that branch).
+- **Re-review catch (fixed on the branch):** the PR's tar packaging line used
+  GNU-only `--owner/--group` flags — macOS's bsdtar 3.5.x rejects them, so
+  under `set -e` the script died right after a successful compile, on the CI
+  runner and local Macs alike (the author presumably had GNU tar installed).
+  Now branched per target (`--uid/--gid` on macOS).
 - **The arm64 slice has never been executed by anyone** — the checklist
   makes both smoke tests explicit.
 
