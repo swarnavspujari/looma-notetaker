@@ -71,6 +71,8 @@ impl Storage {
         if n == 0 {
             return Err(StorageError::NotFound(format!("meeting {id}")));
         }
+        // the attendee list travels in the portable manifest
+        self.refresh_recording_manifest(id)?;
         self.get_meeting(id)
     }
 
@@ -127,29 +129,21 @@ impl Storage {
         self.get_meeting(id)
     }
 
-    /// Rewrite a meeting's `recording.manifest.json` from its current row.
-    /// Resurrection derives `started_at` as `ended_at − duration_ms`, so the
-    /// manifest's ended_at is written as exactly that sum — what makes an
-    /// edited date port to another machine.
-    fn refresh_recording_manifest(&self, id: &str) -> Result<()> {
+    /// Rewrite a meeting's `recording.manifest.json` from its current rows
+    /// (full v2 payload: exact dates, attendees, folder path), so edits made
+    /// after the recording stopped port to another machine.
+    pub(crate) fn refresh_recording_manifest(&self, id: &str) -> Result<()> {
         let meeting = self.get_meeting(id)?;
-        let Some(rec) = &meeting.recording else {
+        let Some(manifest) = self.build_portable_manifest(&meeting) else {
             return Ok(());
         };
-        let Some(rel) = recording_dir_rel(rec) else {
+        let Some(rel) = recording_dir_rel(&manifest.recording) else {
             return Ok(());
         };
         let dir = self.data_dir.join(&rel);
         if !dir.is_dir() {
             return Ok(());
         }
-        let manifest = crate::recovery::RecordingManifest {
-            meeting_id: meeting.id.clone(),
-            note_id: meeting.note_id.clone(),
-            ended_at: meeting.started_at
-                + chrono::Duration::milliseconds(rec.duration_ms as i64),
-            recording: rec.clone(),
-        };
         crate::recovery::write_recording_manifest(&dir, &manifest)?;
         Ok(())
     }
@@ -379,7 +373,7 @@ mod tests {
     /// Editing the meeting date shifts ended_at by the same delta (length
     /// preserved), renames the date-prefixed folder, rebases recording_json,
     /// and rewrites the manifest so the edited date ports to other machines
-    /// (resurrection derives started_at as ended_at − duration).
+    /// (the v2 manifest carries started_at explicitly).
     #[test]
     fn set_started_at_shifts_ended_and_remirrors_disk_names() {
         let (dir, s) = test_storage();
@@ -421,16 +415,14 @@ mod tests {
         assert_eq!(mixed, format!("recordings/{label}/recording.mixed.wav"));
         assert!(dir.path().join(&mixed).exists());
 
-        // manifest travelled + rewritten: rebased paths, portable date
+        // manifest travelled + rewritten: rebased paths, portable exact dates
         let manifest: crate::RecordingManifest = serde_json::from_str(
             &std::fs::read_to_string(new_dir.join(crate::RECORDING_MANIFEST)).unwrap(),
         )
         .unwrap();
         assert_eq!(manifest.recording.mixed_path.as_deref(), Some(mixed.as_str()));
-        assert_eq!(
-            manifest.ended_at - chrono::Duration::milliseconds(60_000),
-            new_start
-        );
+        assert_eq!(manifest.started_at, Some(new_start));
+        assert_eq!(manifest.ended_at, updated.ended_at.unwrap());
     }
 
     /// A meeting without a recording (no folder, no manifest) still gets its

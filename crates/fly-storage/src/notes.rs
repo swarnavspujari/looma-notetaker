@@ -203,6 +203,10 @@ impl Storage {
         if n == 0 {
             return Err(StorageError::NotFound(format!("note {id}")));
         }
+        // the filed-under path lives in each meeting's portable manifest
+        for meeting in self.meetings_for_note(id)? {
+            self.refresh_recording_manifest(&meeting.id)?;
+        }
         Ok(())
     }
 
@@ -242,8 +246,12 @@ impl Storage {
         Ok(())
     }
 
-    /// Rebuild the FTS row and the on-disk markdown mirror for a note.
-    fn sync_note_derived(&self, note: &Note) -> Result<()> {
+    /// Rebuild the FTS row and the on-disk mirrors for a note: the markdown
+    /// mirror under `notes/`, plus a faithful `note.json` (scratchpad +
+    /// blocks with provenance) inside each of the note's meeting folders —
+    /// what makes a copied meeting folder restore the note body, not just
+    /// its flattened markdown.
+    pub(crate) fn sync_note_derived(&self, note: &Note) -> Result<()> {
         let body = note_body_text(note);
         self.conn
             .execute("DELETE FROM notes_fts WHERE note_id = ?1", [&note.id])?;
@@ -252,6 +260,20 @@ impl Storage {
             (&note.id, &note.title, &body),
         )?;
         std::fs::write(self.note_mirror_path(&note.id), note.to_markdown(false))?;
+        let portable = crate::recovery::PortableNote::from_note(note);
+        for meeting in self.meetings_for_note(&note.id)? {
+            let Some(rel) = meeting
+                .recording
+                .as_ref()
+                .and_then(crate::meetings::recording_dir_rel)
+            else {
+                continue;
+            };
+            let dir = self.data_dir.join(rel);
+            if dir.is_dir() {
+                crate::recovery::write_note_mirror(&dir, &portable)?;
+            }
+        }
         Ok(())
     }
 
@@ -281,7 +303,7 @@ impl Storage {
     /// First free `notes/<base>.md` (returned data-dir-relative), checking
     /// both the disk and paths already claimed by other rows (whose mirror
     /// file may not have been written yet).
-    fn allocate_note_path(&self, base: &str) -> String {
+    pub(crate) fn allocate_note_path(&self, base: &str) -> String {
         let taken = |p: &std::path::Path| {
             let rel = format!(
                 "notes/{}",

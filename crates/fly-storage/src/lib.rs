@@ -8,7 +8,9 @@
 //!   notes/_unlinked/…                 — mirrors with no DB row (preserved)
 //!   recordings/<date> <title>/        — one folder per meeting:
 //!     recording.{mic,system,mixed}.wav, source.<ext> (imports),
-//!     transcript.md, transcript.json
+//!     transcript.md, transcript.json,
+//!     recording.manifest.json (portability manifest; see recovery.rs),
+//!     note.json (faithful note mirror: scratchpad + blocks)
 //!   recordings/_unlinked/…            — recordings with no DB row (preserved)
 //!   transcripts/…                     — legacy fallback for transcripts whose
 //!                                       meeting folder is unresolvable
@@ -32,7 +34,9 @@ pub use items::ItemFilter;
 pub use jobs::{TranscriptionJob, JOB_DONE, JOB_FAILED, JOB_QUEUED, JOB_RUNNING};
 pub use meetings::recording_dir_rel;
 pub use notes::NoteSummary;
-pub use recovery::{HealReport, RecordingManifest, RECORDING_MANIFEST};
+pub use recovery::{
+    HealReport, PortableNote, RecordingManifest, MANIFEST_VERSION, NOTE_MIRROR, RECORDING_MANIFEST,
+};
 pub use search::{SearchFilter, SearchHit, SearchHitKind};
 pub use transcripts::SpeakerSnapshot;
 
