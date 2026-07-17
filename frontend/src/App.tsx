@@ -296,14 +296,16 @@ export default function App() {
     }
     let semanticDone = false;
     const fts = window.setTimeout(() => {
-      api.search(q)
+      api
+        .search(q)
         .then((hits) => {
           if (searchSeq.current === seq && !semanticDone) setSearchHits(hits);
         })
         .catch(console.error);
     }, 200);
     const semantic = window.setTimeout(() => {
-      api.searchSemantic(q)
+      api
+        .searchSemantic(q)
         .then((hits) => {
           if (searchSeq.current === seq) {
             semanticDone = true;

@@ -295,14 +295,30 @@ function importTranscribe(order: string[]) {
   mockImport = { ...mockImport, files, boundaries_ms: boundaries, started: true };
 
   // simulated backend events: per-file conversion, then the real pipeline shape
-  const pipe = (stage: string, detail: string | null = null, done = false, error: string | null = null) =>
-    mockEmit("pipeline:progress", { meeting_id: IMPORT_MEETING_ID, stage, detail, done, error });
+  const pipe = (
+    stage: string,
+    detail: string | null = null,
+    done = false,
+    error: string | null = null,
+  ) => mockEmit("pipeline:progress", { meeting_id: IMPORT_MEETING_ID, stage, detail, done, error });
   let t = 200;
   const at = (ms: number, fn: () => void) => window.setTimeout(fn, ms);
   for (const f of files) {
-    at(t, () => mockEmit("import:progress", { meeting_id: IMPORT_MEETING_ID, file_id: f.id, stage: "converting" }));
+    at(t, () =>
+      mockEmit("import:progress", {
+        meeting_id: IMPORT_MEETING_ID,
+        file_id: f.id,
+        stage: "converting",
+      }),
+    );
     t += 700;
-    at(t, () => mockEmit("import:progress", { meeting_id: IMPORT_MEETING_ID, file_id: f.id, stage: "converted" }));
+    at(t, () =>
+      mockEmit("import:progress", {
+        meeting_id: IMPORT_MEETING_ID,
+        file_id: f.id,
+        stage: "converted",
+      }),
+    );
   }
   at((t += 300), () => pipe("waiting"));
   at((t += 500), () => pipe("starting"));
