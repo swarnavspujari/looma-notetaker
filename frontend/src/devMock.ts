@@ -671,6 +671,10 @@ function handle(cmd: string, args: Record<string, unknown> = {}): unknown {
       return null;
     case "search":
       return searchHits(String(args.query ?? ""));
+    case "search_semantic":
+      // dev-mock has no embedding index; the hybrid pass degrades to the
+      // same grouped-FTS shape (one hit per note, best snippet first)
+      return searchHits(String(args.query ?? "")).slice(0, 1);
     case "recording_status":
       return recordingStatus();
     case "screen_status":

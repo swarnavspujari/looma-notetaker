@@ -186,12 +186,14 @@ pub async fn enhance_note(
                 .into(),
         );
     }
-    state
+    let note = state
         .storage
         .lock()
         .unwrap()
         .update_note_blocks(&note_id, &blocks)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    state.embed_notify.notify_one();
+    Ok(note)
 }
 
 /// Edit one enhanced block (AI blocks are reclaimed as user text).
@@ -202,12 +204,14 @@ pub fn edit_note_block(
     block_id: String,
     markdown: String,
 ) -> CmdResult<Note> {
-    state
+    let note = state
         .storage
         .lock()
         .unwrap()
         .edit_note_block(&note_id, &block_id, &markdown)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    state.embed_notify.notify_one();
+    Ok(note)
 }
 
 // ---------------------------------------------------------------------------

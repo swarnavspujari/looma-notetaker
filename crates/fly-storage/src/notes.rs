@@ -218,6 +218,7 @@ impl Storage {
         }
         self.conn
             .execute("DELETE FROM notes_fts WHERE note_id = ?1", [id])?;
+        self.delete_chunks("note", id)?;
         let _ = std::fs::remove_file(mirror);
         let _ = std::fs::remove_dir_all(self.data_dir.join("attachments").join(id));
         Ok(())
@@ -259,6 +260,7 @@ impl Storage {
             "INSERT INTO notes_fts (note_id, title, body) VALUES (?1, ?2, ?3)",
             (&note.id, &note.title, &body),
         )?;
+        self.sync_note_chunks(note)?;
         std::fs::write(self.note_mirror_path(&note.id), note.to_markdown(false))?;
         let portable = crate::recovery::PortableNote::from_note(note);
         for meeting in self.meetings_for_note(&note.id)? {

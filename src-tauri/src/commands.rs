@@ -194,12 +194,14 @@ pub fn update_note_scratchpad(
     id: String,
     scratchpad: String,
 ) -> CmdResult<Note> {
-    state
+    let note = state
         .storage
         .lock()
         .unwrap()
         .update_note_scratchpad(&id, &scratchpad)
-        .map_err(err_str)
+        .map_err(err_str)?;
+    state.embed_notify.notify_one();
+    Ok(note)
 }
 
 #[tauri::command]
@@ -408,4 +410,47 @@ pub fn search(state: State<'_, AppState>, query: String) -> CmdResult<Vec<Search
         .unwrap()
         .search(&query, 30)
         .map_err(err_str)
+}
+
+/// Hybrid search: FTS + vector retrieval fused (RRF) and grouped by note, so
+/// the list reads "most relevant meetings", best snippet first. Best-effort
+/// semantic: when the query can't be embedded (Ollama not running/installed,
+/// model missing) this degrades to grouped FTS — never an error, and never a
+/// server spawn on the search path.
+#[tauri::command]
+pub async fn search_semantic(
+    state: State<'_, AppState>,
+    query: String,
+) -> CmdResult<Vec<SearchHit>> {
+    const LIMIT: usize = 30;
+    let filter = fly_storage::SearchFilter {
+        limit: LIMIT,
+        ..Default::default()
+    };
+    let (fts_notes, fts_transcripts) = state
+        .storage
+        .lock()
+        .unwrap()
+        .search_split(&query, &filter)
+        .map_err(err_str)?;
+
+    let vector = match crate::embeddings::embed_query(&state, &query).await {
+        Some(qvec) => state
+            .storage
+            .lock()
+            .unwrap()
+            .vector_search(&qvec, crate::embeddings::EMBED_MODEL, &filter, LIMIT)
+            .unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "vector search failed, using FTS only");
+                vec![]
+            }),
+        None => vec![],
+    };
+
+    Ok(fly_storage::hybrid::fuse(
+        &fts_notes,
+        &fts_transcripts,
+        &vector,
+        LIMIT,
+    ))
 }
