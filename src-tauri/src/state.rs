@@ -33,6 +33,9 @@ pub struct AppState {
     /// Managed `ollama serve` child (None when a user-run server is used or
     /// the ollama provider isn't active). Killed on app exit (ollama.rs).
     pub ollama: Mutex<Option<std::process::Child>>,
+    /// Nudges the embedding worker after a content write (embeddings.rs).
+    /// The worker also polls, so a missed nudge only delays indexing.
+    pub embed_notify: tokio::sync::Notify,
 }
 
 impl AppState {
@@ -69,6 +72,7 @@ impl AppState {
             screen: Mutex::new(None),
             jobs_notify: tokio::sync::Notify::new(),
             ollama: Mutex::new(None),
+            embed_notify: tokio::sync::Notify::new(),
         })
     }
 

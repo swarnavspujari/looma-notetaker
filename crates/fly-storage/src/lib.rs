@@ -17,7 +17,9 @@
 //!   attachments/<note_id>/…           — attached files, referenced relatively
 
 mod attachments;
+pub mod embeddings;
 mod folders;
+pub mod hybrid;
 mod items;
 mod jobs;
 mod meetings;
@@ -30,6 +32,7 @@ mod settings;
 mod templates;
 mod transcripts;
 
+pub use embeddings::{PendingChunk, VectorHit};
 pub use items::ItemFilter;
 pub use jobs::{TranscriptionJob, JOB_DONE, JOB_FAILED, JOB_QUEUED, JOB_RUNNING};
 pub use meetings::recording_dir_rel;
@@ -281,6 +284,25 @@ impl Storage {
                 meeting_id UNINDEXED,
                 body
             );
+
+            -- Semantic-search chunk store (see embeddings.rs). embedding is
+            -- NULL until the embedding worker fills it; `model` records which
+            -- embedding model produced the vector so a model change simply
+            -- re-queues everything.
+            CREATE TABLE IF NOT EXISTS embedding_chunks (
+                id          INTEGER PRIMARY KEY,
+                owner_kind  TEXT NOT NULL,      -- 'note' | 'transcript'
+                owner_id    TEXT NOT NULL,      -- note id / meeting id
+                chunk_index INTEGER NOT NULL,
+                title       TEXT NOT NULL DEFAULT '',
+                text        TEXT NOT NULL,
+                start_ms    INTEGER,
+                embedding   BLOB,
+                model       TEXT,
+                UNIQUE(owner_kind, owner_id, chunk_index)
+            );
+            CREATE INDEX IF NOT EXISTS idx_embedding_chunks_owner
+                ON embedding_chunks(owner_kind, owner_id);
             "#,
         )?;
         Ok(())

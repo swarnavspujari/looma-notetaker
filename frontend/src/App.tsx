@@ -282,17 +282,44 @@ export default function App() {
     };
   }, []);
 
-  // debounce search-as-you-type
+  // Search-as-you-type, two passes: instant FTS at 200ms, then a hybrid
+  // (FTS + semantic) pass at 450ms that upgrades the same result list. The
+  // semantic pass never *replaces* good FTS results with nothing: it errors
+  // silently and only newer-query responses win (guarded by searchSeq).
+  const searchSeq = useRef(0);
   useEffect(() => {
     const q = searchQuery.trim();
+    const seq = ++searchSeq.current;
     if (!q) {
       setSearchHits([]);
       return;
     }
-    const t = window.setTimeout(() => {
-      api.search(q).then(setSearchHits).catch(console.error);
+    let semanticDone = false;
+    const fts = window.setTimeout(() => {
+      api
+        .search(q)
+        .then((hits) => {
+          if (searchSeq.current === seq && !semanticDone) setSearchHits(hits);
+        })
+        .catch(console.error);
     }, 200);
-    return () => window.clearTimeout(t);
+    const semantic = window.setTimeout(() => {
+      api
+        .searchSemantic(q)
+        .then((hits) => {
+          if (searchSeq.current === seq) {
+            semanticDone = true;
+            setSearchHits(hits);
+          }
+        })
+        .catch(() => {
+          /* semantic pass is best-effort; FTS results stand */
+        });
+    }, 450);
+    return () => {
+      window.clearTimeout(fts);
+      window.clearTimeout(semantic);
+    };
   }, [searchQuery]);
 
   // Monotonic token: rapid note switches fire overlapping fetch chains, and

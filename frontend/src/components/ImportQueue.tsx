@@ -117,8 +117,8 @@ export default function ImportQueue({
     ? briefError(pipelineError)
     : idle
       ? "Files are transcribed in this order — drag to reorder, then hit Transcribe."
-      : (pipeStage && RUNNING_LABELS[pipeStage]) ??
-        (converting != null ? "Preparing audio…" : "Starting…");
+      : ((pipeStage && RUNNING_LABELS[pipeStage]) ??
+        (converting != null ? "Preparing audio…" : "Starting…"));
 
   // 1-based position among the transcribable rows (error rows show "!")
   const rowNumber = (i: number) => files.slice(0, i + 1).filter((f) => !f.error).length;

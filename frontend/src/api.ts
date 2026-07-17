@@ -80,6 +80,9 @@ export const api = {
 
   // search
   search: (query: string) => invoke<SearchHit[]>("search", { query }),
+  // hybrid (FTS + semantic) pass; degrades to grouped FTS when the local
+  // embedding model isn't available
+  searchSemantic: (query: string) => invoke<SearchHit[]>("search_semantic", { query }),
 
   // recording
   recordingStatus: () => invoke<RecordingStatus>("recording_status"),

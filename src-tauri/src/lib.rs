@@ -5,6 +5,7 @@ mod asr_commands;
 mod calendar_commands;
 mod calendar_defaults;
 mod commands;
+pub mod embeddings;
 pub mod extraction;
 pub mod gpu;
 pub mod hw;
@@ -146,6 +147,10 @@ pub fn run() {
             // Drain queued transcriptions (incl. jobs surviving a restart)
             // whenever no recording is active.
             scheduler::spawn(app.handle().clone());
+            // Semantic-search indexer: chunk-backfills existing content, then
+            // embeds pending chunks through Ollama in the background. Fully
+            // best-effort — without Ollama, search stays FTS-only.
+            embeddings::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -176,6 +181,7 @@ pub fn run() {
             commands::get_app_setting,
             commands::set_app_setting,
             commands::search,
+            commands::search_semantic,
             recording::recording_status,
             recording::start_recording,
             recording::pause_recording,
