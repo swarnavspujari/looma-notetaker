@@ -13,5 +13,12 @@ tracing.workspace = true
 chrono.workspace = true
 rusqlite.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# Restart Manager: name the processes holding the DB files when open fails
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_RestartManager",
+] }
+
 [dev-dependencies]
 tempfile = "3"

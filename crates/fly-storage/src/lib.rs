@@ -18,6 +18,7 @@ mod attachments;
 mod folders;
 mod items;
 mod jobs;
+mod lock_owners;
 mod meetings;
 mod migrations;
 pub mod naming;
@@ -59,10 +60,10 @@ pub type Result<T> = std::result::Result<T, StorageError>;
 
 /// Retry policy for [`Storage::open_with_retry`].
 ///
-/// The startup DB open has twice failed with "database disk image is malformed"
-/// against a file that was provably fine — `integrity_check` passed on copies
-/// both times (WAL applied), and relaunching minutes later worked with zero
-/// repair. Some external process interferes at the exact moment of open, then
+/// The startup DB open has repeatedly failed with "database disk image is
+/// malformed" against a file that was provably fine — `integrity_check` passed
+/// on copies every time (WAL applied), and relaunching minutes later worked
+/// with zero repair. Some external process interferes at the exact moment of open, then
 /// clears. We can't tell a transient from real corruption at open time, so we
 /// retry a handful of times over a short window before surfacing the failure;
 /// a genuinely corrupt DB just fails every attempt and still ends up reported.
@@ -75,11 +76,13 @@ pub struct OpenRetry {
 }
 
 impl OpenRetry {
-    /// Startup policy: 6 attempts, 2.5s apart — up to ~12.5s of retrying, which
-    /// covers the observed transient (cleared well within a minute both times)
-    /// without making a truly corrupt DB wait long before the error dialog.
+    /// Startup policy: 12 attempts, 2.5s apart — up to ~27.5s of retrying.
+    /// Originally 6 attempts (~12.5s), but the 2026-07-16 occurrence outlasted
+    /// that window; the transients cleared well within a minute every time, so
+    /// the window is sized to ride those out without making a truly corrupt DB
+    /// wait unreasonably long before the error dialog.
     pub const STARTUP: Self = Self {
-        attempts: 6,
+        attempts: 12,
         backoff: Duration::from_millis(2500),
     };
 }
@@ -115,11 +118,16 @@ impl Storage {
 
     /// Like [`open`](Self::open) but retries transient failures with backoff
     /// per `retry` before giving up. Each failed attempt is logged with its
-    /// number and error text so a recurring interferer finally leaves evidence.
-    /// The last attempt's error is returned unchanged, so the caller's fatal
-    /// path (e.g. the startup error dialog) is reached only after retrying.
+    /// number and error text, and (on Windows) with the processes currently
+    /// holding open handles to the DB files — the evidence the recurring
+    /// interferer has never left. The last attempt's error is returned
+    /// unchanged, so the caller's fatal path (e.g. the startup error dialog)
+    /// is reached only after retrying.
     pub fn open_with_retry(data_dir: &Path, retry: OpenRetry) -> Result<Self> {
-        Self::retry_open(retry, || Self::open(data_dir))
+        Self::retry_open(retry, || {
+            Self::open(data_dir)
+                .inspect_err(|_| lock_owners::log_db_lock_owners(data_dir, Self::DB_FILE))
+        })
     }
 
     /// Retry core, generic over the open closure so a test can drive the
