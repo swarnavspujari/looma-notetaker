@@ -317,6 +317,7 @@
       <a class="btn btn-outline" href="https://github.com/swarnavspujari/fly-on-the-wall/releases/latest">Linux</a>
     </div>
     <p class="fineprint">Works with Zoom, Meet, Teams — anything that makes sound on your computer.</p>
+    <p class="fineprint" id="stats-line" hidden><strong id="dl-count"></strong> downloads and counting.</p>
     <img class="shot hero-shot" src="assets/screenshots/app-transcript-light.webp"
          alt="The Fly on the Wall main window: a meeting transcript with three color-coded speakers, a playable waveform, screen recordings, folders, and upcoming calendar meetings"
          width="1600" height="1103" fetchpriority="high">
@@ -598,6 +599,16 @@
     syncToggleLabel();
   });
   syncToggleLabel();
+
+  // Download counter (docs/data/stats.json, refreshed daily by the stats workflow).
+  fetch("data/stats.json")
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (s) {
+      if (!s || !s.totalDownloads) return;
+      document.getElementById("dl-count").textContent = s.totalDownloads;
+      document.getElementById("stats-line").hidden = false;
+    })
+    .catch(function () {});
 
   // Scroll reveal, skipped for reduced motion.
   if (matchMedia("(prefers-reduced-motion: no-preference)").matches && "IntersectionObserver" in window) {
