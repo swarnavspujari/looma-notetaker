@@ -201,6 +201,19 @@ impl Storage {
             let Some(rec) = &meeting.recording else {
                 continue;
             };
+            // A running pipeline captured absolute paths at start; renaming
+            // under it invalidates hours of ASR. Keep the old name — the
+            // next title/date edit renames once the job is over.
+            if self
+                .transcription_job(&meeting.id)?
+                .is_some_and(|j| j.status == crate::jobs::JOB_RUNNING)
+            {
+                tracing::info!(
+                    meeting_id = meeting.id,
+                    "transcription running; keeping the meeting folder's old name"
+                );
+                continue;
+            }
             let Some(old_rel) = recording_dir_rel(rec) else {
                 continue;
             };
@@ -456,6 +469,58 @@ mod tests {
             rec.mixed_path.as_deref(),
             Some("recordings/x/recording.mixed.wav")
         );
+    }
+
+    /// A meeting whose transcription job is RUNNING keeps its folder name:
+    /// the pipeline captured absolute paths at start, and a mid-run rename
+    /// invalidates them after hours of ASR (observed: a 586-minute import
+    /// lost ~9 h of decoding when diarization couldn't find its input). The
+    /// rename applies on the next title/date edit once the job ends.
+    #[test]
+    fn rename_skips_meetings_with_a_running_transcription_job() {
+        let (dir, s) = test_storage();
+        let note = s.create_note("Untitled", None).unwrap();
+        let meeting = s.create_meeting("Untitled", &note.id, &[]).unwrap();
+        let rec_dir = s
+            .allocate_meeting_dir("Untitled", meeting.started_at)
+            .unwrap();
+        std::fs::write(rec_dir.join("recording.mixed.wav"), b"RIFF").unwrap();
+        let rel = format!(
+            "recordings/{}/recording.mixed.wav",
+            rec_dir.file_name().unwrap().to_string_lossy()
+        );
+        let rec = RecordingRef {
+            mic_path: None,
+            system_path: None,
+            mixed_path: Some(rel.clone()),
+            playback_path: None,
+            duration_ms: 1_000,
+        };
+        s.end_meeting(&meeting.id, &rec).unwrap();
+
+        s.enqueue_transcription(&meeting.id).unwrap();
+        s.mark_transcription_running(&meeting.id).unwrap();
+        s.update_note_title(&note.id, "Power Writing Course")
+            .unwrap();
+        assert!(rec_dir.is_dir(), "folder must keep its name mid-pipeline");
+        assert_eq!(
+            s.get_meeting(&meeting.id)
+                .unwrap()
+                .recording
+                .unwrap()
+                .mixed_path
+                .as_deref(),
+            Some(rel.as_str()),
+            "stored paths must stay untouched mid-pipeline"
+        );
+
+        // job over → the next edit renames as usual
+        s.mark_transcription_done(&meeting.id).unwrap();
+        s.update_note_title(&note.id, "Power Writing Course v2")
+            .unwrap();
+        let label = crate::naming::disk_label(meeting.started_at, "Power Writing Course v2");
+        assert!(dir.path().join("recordings").join(&label).is_dir());
+        assert!(!rec_dir.exists());
     }
 
     /// A title rename must also rewrite the manifest inside the renamed

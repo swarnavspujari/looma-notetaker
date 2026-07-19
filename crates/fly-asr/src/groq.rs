@@ -13,6 +13,7 @@ use std::path::Path;
 use fly_audio::vad::{detect_speech_spans, map_to_original, stitch_spans, VadConfig};
 use fly_core::Word;
 
+use crate::retry::{classify_http_failure, retry_delay, QuotaPacer};
 use crate::whisper_cpp::{plan_batches, NORMALIZE_MAX_GAIN, NORMALIZE_TARGET_PEAK};
 use crate::{AsrError, RawTranscript, Result, TranscribeOptions, TranscriptionEngine};
 
@@ -29,6 +30,11 @@ pub struct GroqEngine {
     pub api_key: String,
     pub model: String,
     pub base_url: String,
+    /// Persist each completed upload batch next to the input wav and skip
+    /// batches a previous run of the same plan already transcribed
+    /// (crate::checkpoint) — paced cloud runs are long, and finished chunks
+    /// must survive a crash or restart.
+    pub resume: bool,
 }
 
 impl GroqEngine {
@@ -37,6 +43,7 @@ impl GroqEngine {
             api_key,
             model: GROQ_DEFAULT_MODEL.to_string(),
             base_url: "https://api.groq.com/openai/v1".to_string(),
+            resume: false,
         }
     }
 }
@@ -71,12 +78,43 @@ impl TranscriptionEngine for GroqEngine {
 
         let mut language = None;
         let mut words = Vec::new();
+        // One pacer per job: uploads are proactively spaced so the whole run
+        // stays inside the free-tier audio-per-hour quota instead of burning
+        // it in minutes and losing the job to a 429.
+        let started = std::time::Instant::now();
+        let mut pacer = QuotaPacer::default();
+        let batches = plan_batches(&spans, segment_ms);
+        let mut ckpt = self.resume.then(|| {
+            crate::checkpoint::CheckpointFile::open(
+                crate::checkpoint::checkpoint_path_for(wav_path),
+                crate::checkpoint::plan_key(
+                    "groq",
+                    &self.model,
+                    opts.language.as_deref(),
+                    &batches,
+                ),
+            )
+        });
+        let resumed = ckpt.as_ref().map(|c| c.resumed()).unwrap_or_default();
+        if !resumed.is_empty() {
+            tracing::info!(
+                resumed = resumed.len(),
+                total = batches.len(),
+                "resuming cloud transcription from ASR checkpoint"
+            );
+        }
         // Uploads are cut at speech-span gaps (plan_batches). Only a single
         // contiguous speech span longer than the payload cap falls back to
         // fixed overlapping chunks stitched at the overlap midpoint.
-        for (bi, batch) in plan_batches(&spans, segment_ms).into_iter().enumerate() {
+        for (bi, batch) in batches.iter().enumerate() {
+            if let Some(done) = resumed.get(bi) {
+                language = language.or_else(|| done.language.clone());
+                words.extend(done.words.iter().cloned());
+                continue;
+            }
+            let mut batch_language = None;
             let oversized = batch.len() == 1 && batch[0].end_ms - batch[0].start_ms > segment_ms;
-            if oversized {
+            let batch_words: Vec<Word> = if oversized {
                 let span = batch[0];
                 let s0 = (span.start_ms * rate as u64 / 1000) as usize;
                 let e0 = ((span.end_ms * rate as u64 / 1000) as usize).min(samples.len());
@@ -92,43 +130,58 @@ impl TranscriptionEngine for GroqEngine {
                     let s = (cs * rate as u64 / 1000) as usize;
                     let e = ((ce * rate as u64 / 1000) as usize).min(span_samples.len());
                     let raw = self
-                        .transcribe_bytes(
+                        .upload_chunk(
+                            &mut pacer,
+                            &started,
                             wav_bytes_mono_16(&span_samples[s..e], rate),
+                            (e - s) as u64 * 1000 / rate as u64,
                             format!("speech-{bi}-{i}.wav"),
                             opts,
                         )
                         .await?;
-                    language = language.or(raw.language);
+                    batch_language = batch_language.or(raw.language);
                     per_chunk.push(raw.words);
                 }
                 // stitched timestamps are relative to the span; shift to
                 // absolute original-file time
-                words.extend(offset_words(
-                    stitch_chunk_words(&chunks, per_chunk),
-                    span.start_ms,
-                ));
+                offset_words(stitch_chunk_words(&chunks, per_chunk), span.start_ms)
             } else {
-                let (mut chunk, map) = stitch_spans(&samples, rate, &batch)
+                let (mut chunk, map) = stitch_spans(&samples, rate, batch)
                     .map_err(|e| AsrError::BadAudio(e.to_string()))?;
                 fly_audio::mix::normalize_peak(
                     &mut chunk,
                     NORMALIZE_TARGET_PEAK,
                     NORMALIZE_MAX_GAIN,
                 );
+                let audio_ms = chunk.len() as u64 * 1000 / rate as u64;
                 let raw = self
-                    .transcribe_bytes(
+                    .upload_chunk(
+                        &mut pacer,
+                        &started,
                         wav_bytes_mono_16(&chunk, rate),
+                        audio_ms,
                         format!("speech-{bi}.wav"),
                         opts,
                     )
                     .await?;
-                language = language.or(raw.language);
-                words.extend(raw.words.into_iter().map(|mut w| {
-                    w.start_ms = map_to_original(w.start_ms, &map);
-                    w.end_ms = map_to_original(w.end_ms, &map);
-                    w
-                }));
+                batch_language = raw.language;
+                raw.words
+                    .into_iter()
+                    .map(|mut w| {
+                        w.start_ms = map_to_original(w.start_ms, &map);
+                        w.end_ms = map_to_original(w.end_ms, &map);
+                        w
+                    })
+                    .collect()
+            };
+            if let Some(c) = ckpt.as_mut() {
+                c.push(crate::checkpoint::BatchResult {
+                    language: batch_language.clone(),
+                    words: batch_words.clone(),
+                });
             }
+            language = language.or(batch_language);
+            words.extend(batch_words);
         }
 
         Ok(RawTranscript {
@@ -152,6 +205,59 @@ fn offset_words(words: Vec<Word>, offset_ms: u64) -> Vec<Word> {
 }
 
 impl GroqEngine {
+    /// One chunk, resiliently: wait out the free-tier pacer, then retry
+    /// transient failures per the policy in [`crate::retry`] — bounded
+    /// backoff for network errors, honored `retry-after` for 429s. Only a
+    /// hard rejection (4xx) or an exhausted retry budget surfaces to the
+    /// caller, whose whole-job local fallback remains the last resort.
+    #[allow(clippy::too_many_arguments)]
+    async fn upload_chunk(
+        &self,
+        pacer: &mut QuotaPacer,
+        job_started: &std::time::Instant,
+        bytes: Vec<u8>,
+        audio_ms: u64,
+        file_name: String,
+        opts: &TranscribeOptions,
+    ) -> Result<RawTranscript> {
+        let now_ms = || job_started.elapsed().as_millis() as u64;
+        let pace = pacer.wait_ms(now_ms(), audio_ms);
+        if pace > 0 {
+            tracing::info!(
+                wait_secs = pace / 1000,
+                "pacing cloud upload to stay inside the free-tier audio quota"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(pace)).await;
+        }
+
+        let mut network_attempts = 0u32;
+        let mut rate_limited_waited = std::time::Duration::ZERO;
+        loop {
+            pacer.record(now_ms(), audio_ms);
+            let err = match self
+                .transcribe_bytes(bytes.clone(), file_name.clone(), opts)
+                .await
+            {
+                Ok(raw) => return Ok(raw),
+                Err(e) => e,
+            };
+            let Some(delay) = retry_delay(&err, network_attempts, rate_limited_waited) else {
+                return Err(err);
+            };
+            match &err {
+                AsrError::Network(_) => network_attempts += 1,
+                AsrError::RateLimited { .. } => rate_limited_waited += delay,
+                _ => {}
+            }
+            tracing::warn!(
+                error = %err,
+                retry_in_secs = delay.as_secs(),
+                "cloud chunk upload failed — retrying"
+            );
+            tokio::time::sleep(delay).await;
+        }
+    }
+
     /// Upload one WAV payload and parse the transcription response.
     async fn transcribe_bytes(
         &self,
@@ -194,23 +300,23 @@ impl GroqEngine {
             .map_err(|e| AsrError::Network(e.to_string()))?;
 
         let status = resp.status();
+        let retry_after = resp
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
         let body = resp
             .text()
             .await
             .map_err(|e| AsrError::Network(e.to_string()))?;
-        if status.is_client_error() {
-            // 4xx (413 payload too large, 401 bad key, …): the identical
-            // request can never succeed — callers must not retry it.
-            return Err(AsrError::Rejected(format!(
-                "groq returned {status}: {}",
-                body.chars().take(300).collect::<String>()
-            )));
-        }
         if !status.is_success() {
-            return Err(AsrError::Engine(format!(
-                "groq returned {status}: {}",
-                body.chars().take(300).collect::<String>()
-            )));
+            // 429 → retryable RateLimited; other 4xx → permanent Rejected;
+            // 5xx → Engine (the scheduler may retry the whole job).
+            return Err(classify_http_failure(
+                status.as_u16(),
+                retry_after.as_deref(),
+                &body,
+            ));
         }
         parse_groq_verbose_json(&body)
     }

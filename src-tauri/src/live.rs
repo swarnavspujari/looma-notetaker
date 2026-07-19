@@ -150,6 +150,8 @@ async fn run(app: tauri::AppHandle, meeting_id: String, out_dir: PathBuf, stop: 
         model,
         threads,
         force_cpu: cfg!(target_os = "macos"),
+        // live windows are throwaway snippets — nothing to checkpoint
+        resume: false,
     };
     let _ = app.emit(
         "live:status",

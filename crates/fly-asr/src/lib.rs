@@ -7,7 +7,9 @@
 //!   so). Returns no speaker labels; diarization always runs locally
 //!   regardless (spec §6.3).
 
+pub mod checkpoint;
 pub mod groq;
+pub mod retry;
 pub mod whisper_cpp;
 
 use std::path::Path;
@@ -30,6 +32,15 @@ pub enum AsrError {
     /// string-typed layers (the app's job scheduler) can stop retrying.
     #[error("cloud ASR rejected the request: {0}")]
     Rejected(String),
+    /// Cloud ASR quota exhausted (429) — transient by definition: the rolling
+    /// window reopens. Carries the server's wait hint when it sent one.
+    /// Deliberately does NOT share [`REJECTED_MARKER`]'s wording: the
+    /// scheduler must keep retrying jobs that die rate-limited.
+    #[error("cloud ASR rate-limited: {message}")]
+    RateLimited {
+        message: String,
+        retry_after: Option<std::time::Duration>,
+    },
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
