@@ -336,4 +336,16 @@ mod tests {
         assert!(!permanent_failure(&e.to_string()));
         assert!(permanent_failure(pipeline::ERR_NO_RECORDING_FILES));
     }
+
+    /// A quota 429 is transient by definition (the window reopens) — it must
+    /// never read as the permanent Rejected marker, or one busy hour would
+    /// park the job as failed.
+    #[test]
+    fn rate_limited_cloud_errors_are_retryable() {
+        let e = fly_asr::AsrError::RateLimited {
+            message: "groq returned 429 Too Many Requests: rate limit reached".into(),
+            retry_after: None,
+        };
+        assert!(!permanent_failure(&e.to_string()));
+    }
 }

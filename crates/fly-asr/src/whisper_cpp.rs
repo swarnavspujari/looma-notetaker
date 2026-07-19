@@ -33,6 +33,11 @@ pub struct WhisperCppEngine {
     /// on the pinned Windows build) decodes on CPU. False leaves the build's
     /// default untouched — identical invocation to before this flag existed.
     pub force_cpu: bool,
+    /// Persist each completed batch next to the input wav and skip batches a
+    /// previous run of the same plan already decoded (crate::checkpoint) —
+    /// hours of finished ASR must survive a crash, restart, or failover.
+    /// Off for short-lived callers (benchmarks, live captions).
+    pub resume: bool,
 }
 
 #[async_trait::async_trait]
@@ -77,6 +82,30 @@ impl TranscriptionEngine for WhisperCppEngine {
         let mut words = Vec::new();
         let mut language = None;
         let batches = plan_batches(&spans, MAX_BATCH_SPEECH_MS);
+        let mut ckpt = self.resume.then(|| {
+            let model_tag = self
+                .model
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            crate::checkpoint::CheckpointFile::open(
+                crate::checkpoint::checkpoint_path_for(wav_path),
+                crate::checkpoint::plan_key(
+                    "whisper.cpp",
+                    &model_tag,
+                    opts.language.as_deref(),
+                    &batches,
+                ),
+            )
+        });
+        let resumed = ckpt.as_ref().map(|c| c.resumed()).unwrap_or_default();
+        if !resumed.is_empty() {
+            tracing::info!(
+                resumed = resumed.len(),
+                total = batches.len(),
+                "resuming transcription from ASR checkpoint"
+            );
+        }
         // Initial 0% so the UI shows progress before the first — possibly
         // minutes-long — batch completes. A silent recording (no speech)
         // emits nothing: there is no work to report a fraction of.
@@ -86,17 +115,39 @@ impl TranscriptionEngine for WhisperCppEngine {
                 total_ms: total_speech_ms,
             });
         }
-        for (batch, progress) in batches.iter().zip(cumulative_progress(&batches)) {
+        for (i, (batch, progress)) in batches
+            .iter()
+            .zip(cumulative_progress(&batches))
+            .enumerate()
+        {
+            if let Some(done) = resumed.get(i) {
+                language = language.or_else(|| done.language.clone());
+                words.extend(done.words.iter().cloned());
+                on_progress(progress);
+                continue;
+            }
             let (mut chunk, map) = stitch_spans(&samples, rate, batch)
                 .map_err(|e| AsrError::BadAudio(e.to_string()))?;
             fly_audio::mix::normalize_peak(&mut chunk, NORMALIZE_TARGET_PEAK, NORMALIZE_MAX_GAIN);
             let raw = self.run_whisper_cli(&chunk, rate, opts).await?;
-            language = language.or(raw.language);
-            words.extend(raw.words.into_iter().map(|mut w| {
-                w.start_ms = map_to_original(w.start_ms, &map);
-                w.end_ms = map_to_original(w.end_ms, &map);
-                w
-            }));
+            let batch_language = raw.language;
+            let mapped: Vec<Word> = raw
+                .words
+                .into_iter()
+                .map(|mut w| {
+                    w.start_ms = map_to_original(w.start_ms, &map);
+                    w.end_ms = map_to_original(w.end_ms, &map);
+                    w
+                })
+                .collect();
+            if let Some(c) = ckpt.as_mut() {
+                c.push(crate::checkpoint::BatchResult {
+                    language: batch_language.clone(),
+                    words: mapped.clone(),
+                });
+            }
+            language = language.or(batch_language);
+            words.extend(mapped);
             on_progress(progress);
         }
 
@@ -350,6 +401,73 @@ mod tests {
     #[test]
     fn silent_recording_yields_no_progress_points() {
         assert!(cumulative_progress(&plan_batches(&[], 120_000)).is_empty());
+    }
+
+    /// Resume proof: with a checkpoint covering every batch of the plan, the
+    /// engine must return the checkpointed words WITHOUT launching
+    /// whisper-cli at all (the exe here doesn't exist — any decode attempt
+    /// would error). This is the property that saves an 11-hour job from a
+    /// post-ASR failure: the retry re-reads finished batches instead of
+    /// re-decoding them.
+    #[tokio::test]
+    async fn completed_checkpoint_batches_resume_without_decoding() {
+        let dir = tempfile::tempdir().unwrap();
+        // 2s of clear tone at 16 kHz → exactly one speech span / one batch
+        let rate = 16_000u32;
+        let samples: Vec<f32> = (0..(2 * rate) as usize)
+            .map(|i| (i as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() * 0.4)
+            .collect();
+        let wav = dir.path().join("track.16k.wav");
+        fly_audio::mix::write_wav_mono_16(&wav, &samples, rate).unwrap();
+        let model = dir.path().join("model.bin");
+        std::fs::write(&model, b"fake model").unwrap();
+
+        // the same plan the engine will compute
+        let spans = detect_speech_spans(&samples, rate, &VadConfig::default());
+        let batches = plan_batches(&spans, MAX_BATCH_SPEECH_MS);
+        assert!(!batches.is_empty(), "test wav must contain speech");
+        let opts = TranscribeOptions {
+            language: Some("en".into()),
+            ..Default::default()
+        };
+        let key = crate::checkpoint::plan_key("whisper.cpp", "model.bin", Some("en"), &batches);
+        let mut ckpt = crate::checkpoint::CheckpointFile::open(
+            crate::checkpoint::checkpoint_path_for(&wav),
+            key,
+        );
+        for _ in &batches {
+            ckpt.push(crate::checkpoint::BatchResult {
+                language: Some("en".into()),
+                words: vec![Word {
+                    text: "resumed".into(),
+                    start_ms: 100,
+                    end_ms: 300,
+                }],
+            });
+        }
+
+        let engine = WhisperCppEngine {
+            exe: dir.path().join("does-not-exist.exe"),
+            model,
+            threads: 1,
+            force_cpu: true,
+            resume: true,
+        };
+        let raw = engine
+            .transcribe(&wav, &opts)
+            .await
+            .expect("fully-checkpointed run must not decode");
+        assert_eq!(raw.words.len(), batches.len());
+        assert_eq!(raw.words[0].text, "resumed");
+        assert_eq!(raw.language.as_deref(), Some("en"));
+
+        // ...and with resume off, the missing exe surfaces immediately —
+        // proof the checkpoint is what rescued the run above.
+        let engine = WhisperCppEngine {
+            resume: false,
+            ..engine
+        };
+        assert!(engine.transcribe(&wav, &opts).await.is_err());
     }
 
     #[test]
