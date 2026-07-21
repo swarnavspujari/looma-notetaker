@@ -762,8 +762,8 @@ export default function SettingsModal({
                   still runs locally. Audio goes to Groq first, paced to stay inside the free
                   tier&apos;s hourly limit; whenever the quota is busy, this machine&apos;s GPU or
                   CPU transcribes in the meantime. Finished parts are saved as they complete, so a
-                  quit or restart picks up where it left off — nothing is transcribed twice.
-                  Applied when you press Save.
+                  quit or restart picks up where it left off — nothing is transcribed twice. Applied
+                  when you press Save.
                 </p>
               </Card>
             </div>
