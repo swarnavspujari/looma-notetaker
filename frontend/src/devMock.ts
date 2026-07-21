@@ -245,6 +245,7 @@ const asrSettings = {
   has_groq_key: false,
   auto_transcribe: true,
   use_gpu: true,
+  gpu_available: true,
   gpu_bench: null,
   hw: {
     ram_gb: 32,
@@ -449,6 +450,12 @@ function handle(cmd: string, args: Record<string, unknown> = {}): unknown {
       return note(String(args.id ?? args.noteId ?? "n1"));
     case "get_meeting_for_note":
       return meeting(String(args.noteId));
+    case "get_meetings_for_note": {
+      const m = meeting(String(args.noteId));
+      return m ? [m] : [];
+    }
+    case "live_status":
+      return null;
     case "get_transcript":
       // fotwMockNoTranscript = "1" → pre-transcription state (the
       // "Transcribe recording" box, where the pipeline notices render).

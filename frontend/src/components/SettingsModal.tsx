@@ -768,7 +768,20 @@ export default function SettingsModal({
             </div>
           )}
 
-          {tier !== "cloud" && (
+          {tier !== "cloud" && settings?.gpu_available === false && (
+            <>
+              <Checkbox
+                checked={false}
+                disabled
+                label="Use GPU for transcription when it is faster on this machine"
+              />
+              <p className="pl-7 text-text-3" style={{ fontSize: 11, lineHeight: 1.5 }}>
+                Not available on this Mac — GPU transcription needs Apple Silicon, so this machine
+                transcribes on the CPU.
+              </p>
+            </>
+          )}
+          {tier !== "cloud" && settings?.gpu_available !== false && (
             <>
               <Checkbox
                 checked={useGpu}

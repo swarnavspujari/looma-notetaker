@@ -398,21 +398,24 @@ pub async fn run_with(
                 Some(model_id),
             ),
             None => {
-                // macOS: whisper.cpp defaults to Metal, and on GPUs that
-                // Metal can't actually serve (e.g. Intel-era Macs) ggml's
-                // Metal init aborts with SIGABRT — that crash must not sink
-                // the meeting. Run Metal as a guarded primary with a
-                // forced-CPU fallback — mirroring the Windows Vulkan guard —
-                // and honor a prior runtime-failure pin so later meetings
-                // skip the doomed Metal attempt entirely (toggling the
-                // Settings switch off→on clears the pin, same as Windows).
+                // macOS: whisper.cpp defaults to Metal — but only Apple
+                // Silicon gets it. The Intel smoke test (PR #37) showed Metal
+                // on an AMD GPU SILENTLY CORRUPTING output (exit 0, one bogus
+                // segment), which no crash guard can catch, so Intel Macs go
+                // straight to CPU (`-ng`). On Apple Silicon, Metal runs as a
+                // guarded primary with a forced-CPU fallback — mirroring the
+                // Windows Vulkan guard — and honors a prior runtime-failure
+                // pin so later meetings skip a Metal attempt that failed here
+                // (toggling the Settings switch off→on clears the pin, same
+                // as Windows). The architecture check is a runtime sysctl,
+                // not compile-time: the binary is universal (gpu.rs).
                 #[cfg(target_os = "macos")]
                 {
                     let pinned_cpu = {
                         let storage = state.storage.lock().unwrap();
                         cpu_pinned_for_model(&storage, &model_id)
                     };
-                    if use_gpu && !pinned_cpu {
+                    if use_gpu && !pinned_cpu && gpu::is_apple_silicon() {
                         GuardedAsr::with_cpu_fallback(
                             Box::new(fly_asr::whisper_cpp::WhisperCppEngine {
                                 exe: whisper_exe.clone(),
