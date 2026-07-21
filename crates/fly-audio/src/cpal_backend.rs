@@ -94,7 +94,8 @@ impl AudioCapture for CpalAudioCapture {
         std::fs::create_dir_all(&cfg.out_dir)?;
         let clock = Arc::new(Clock::new());
         let (cmd_tx, cmd_rx) = std::sync::mpsc::channel::<Command>();
-        let (ready_tx, ready_rx) = std::sync::mpsc::channel::<Result<Vec<String>>>();
+        let (ready_tx, ready_rx) =
+            std::sync::mpsc::channel::<Result<(Vec<String>, CaptureHealth)>>();
         let (done_tx, done_rx) = std::sync::mpsc::channel::<Result<CaptureOutput>>();
 
         let thread_clock = clock.clone();
@@ -105,7 +106,7 @@ impl AudioCapture for CpalAudioCapture {
 
         // Surface stream-construction errors synchronously to the caller;
         // a degraded start (mic ok, loopback failed) comes back as warnings.
-        let warnings = ready_rx
+        let (warnings, health) = ready_rx
             .recv()
             .map_err(|_| AudioError::Backend("audio thread died during startup".into()))??;
 
@@ -115,6 +116,7 @@ impl AudioCapture for CpalAudioCapture {
             clock,
             state: CaptureState::Recording,
             warnings,
+            health,
         }))
     }
 }
@@ -132,6 +134,28 @@ struct CpalSession {
     state: CaptureState,
     /// Startup degradations (loopback failed → mic-only), set once.
     warnings: Vec<String>,
+    /// Dynamic capture health, re-evaluated on every `warnings()` poll.
+    health: CaptureHealth,
+}
+
+/// Dynamic capture health readable from the session while the audio thread
+/// owns the channels: today, the macOS tap's silence detection (an
+/// un-entitled build's tap delivers only zeros — see coreaudio_tap.rs);
+/// inert on the other platforms.
+#[derive(Clone, Default)]
+struct CaptureHealth {
+    #[cfg(target_os = "macos")]
+    tap: Option<crate::coreaudio_tap::TapHealth>,
+}
+
+impl CaptureHealth {
+    fn warnings(&self) -> Vec<String> {
+        #[cfg(target_os = "macos")]
+        if let Some(w) = self.tap.as_ref().and_then(|t| t.silence_warning()) {
+            return vec![w];
+        }
+        Vec::new()
+    }
 }
 
 impl CaptureSession for CpalSession {
@@ -175,7 +199,9 @@ impl CaptureSession for CpalSession {
     }
 
     fn warnings(&self) -> Vec<String> {
-        self.warnings.clone()
+        let mut all = self.warnings.clone();
+        all.extend(self.health.warnings());
+        all
     }
 }
 
@@ -306,7 +332,7 @@ fn audio_thread(
     cfg: CaptureConfig,
     clock: Arc<Clock>,
     cmd_rx: Receiver<Command>,
-    ready_tx: Sender<Result<Vec<String>>>,
+    ready_tx: Sender<Result<(Vec<String>, CaptureHealth)>>,
     done_tx: Sender<Result<CaptureOutput>>,
 ) {
     let host = cpal::default_host();
@@ -340,7 +366,16 @@ fn audio_thread(
         None
     };
 
-    let _ = ready_tx.send(Ok(warnings));
+    #[cfg(target_os = "macos")]
+    let health = CaptureHealth {
+        tap: system.as_ref().and_then(|s| match s {
+            LoopbackChannel::CoreAudioTap(r) => Some(r.health()),
+            _ => None,
+        }),
+    };
+    #[cfg(not(target_os = "macos"))]
+    let health = CaptureHealth::default();
+    let _ = ready_tx.send(Ok((warnings, health)));
 
     let streams: Vec<&cpal::Stream> = std::iter::once(&mic._stream)
         .chain(system.iter().filter_map(|s| s.cpal_stream()))

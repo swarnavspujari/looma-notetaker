@@ -39,10 +39,11 @@ use dispatch2::DispatchQueue;
 use objc2::runtime::AnyClass;
 use objc2::AnyThread;
 use objc2_core_audio::{
-    kAudioDevicePropertyDeviceUID, kAudioHardwarePropertyDefaultOutputDevice,
-    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
-    kAudioTapPropertyFormat, AudioDeviceCreateIOProcIDWithBlock, AudioDeviceDestroyIOProcID,
-    AudioDeviceIOProcID, AudioDeviceStart, AudioDeviceStop, AudioHardwareDestroyAggregateDevice,
+    kAudioDevicePropertyDeviceIsRunningSomewhere, kAudioDevicePropertyDeviceUID,
+    kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
+    kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioTapPropertyFormat,
+    AudioDeviceCreateIOProcIDWithBlock, AudioDeviceDestroyIOProcID, AudioDeviceIOProcID,
+    AudioDeviceStart, AudioDeviceStop, AudioHardwareDestroyAggregateDevice,
     AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress, CATapDescription,
 };
 use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp};
@@ -131,6 +132,49 @@ unsafe fn get_property<T>(object: AudioObjectID, selector: u32) -> Result<T> {
     Ok(value)
 }
 
+/// Live health probe for the tap, readable from the session while the audio
+/// thread owns the recorder. Detects the signed-binary / consent hazard —
+/// the IOProc firing, the output device rendering for some process, yet
+/// every delivered sample digital zero — so the person recording learns
+/// DURING the meeting that the far end is missing, not after.
+#[derive(Clone)]
+pub(crate) struct TapHealth {
+    written: Arc<AtomicU64>,
+    nonzero: Arc<AtomicU64>,
+    rate: u32,
+    output_device: AudioObjectID,
+}
+
+impl TapHealth {
+    /// Some(warning) once ≥5 s of tap timeline exist with zero non-silent
+    /// samples WHILE the output device is rendering somewhere. The
+    /// running-somewhere gate keeps quiet in-person meetings (nothing
+    /// playing at all — silence is correct) from tripping it; any real
+    /// sample ever captured disarms it for good.
+    pub(crate) fn silence_warning(&self) -> Option<String> {
+        if self.nonzero.load(Ordering::Relaxed) > 0
+            || self.written.load(Ordering::Relaxed) < 5 * self.rate as u64
+        {
+            return None;
+        }
+        let running: u32 = unsafe {
+            get_property(
+                self.output_device,
+                kAudioDevicePropertyDeviceIsRunningSomewhere,
+            )
+            .unwrap_or(0)
+        };
+        (running != 0).then(|| {
+            "System audio is playing but its capture is recording only silence — macOS \
+             hasn't granted this build system-audio recording permission (unsigned dev \
+             builds always record silence; grant it in System Settings → Privacy & \
+             Security → Screen & System Audio Recording). The other participants may be \
+             missing from this recording."
+                .to_string()
+        })
+    }
+}
+
 pub struct TapRecorder {
     pub writer: SharedWriter,
     pub path: PathBuf,
@@ -144,6 +188,7 @@ pub struct TapRecorder {
     callbacks: Arc<AtomicU64>,
     tap_id: AudioObjectID,
     aggregate_id: AudioObjectID,
+    default_output: AudioObjectID,
     proc_id: AudioDeviceIOProcID,
     destroy_tap: DestroyTapFn,
     stopped: AtomicBool,
@@ -421,12 +466,22 @@ impl TapRecorder {
             callbacks,
             tap_id,
             aggregate_id,
+            default_output,
             proc_id,
             destroy_tap,
             stopped: AtomicBool::new(false),
             _io_block: io_block,
             _queue: queue,
         })
+    }
+
+    pub(crate) fn health(&self) -> TapHealth {
+        TapHealth {
+            written: self.written.clone(),
+            nonzero: self.nonzero.clone(),
+            rate: self.rate,
+            output_device: self.default_output,
+        }
     }
 
     /// Stop the IOProc and destroy the aggregate + tap. Also the place the
