@@ -86,6 +86,13 @@ export const api = {
   resumeRecording: () => invoke<RecordingStatus>("resume_recording"),
   stopRecording: () => invoke<Meeting>("stop_recording"),
   getMeetingForNote: (noteId: string) => invoke<Meeting | null>("get_meeting_for_note", { noteId }),
+  /** Latest live-caption status for a meeting (catch-up for the live pane —
+   *  a status emitted before the pane mounted would otherwise be lost). */
+  liveStatus: (meetingId: string) =>
+    invoke<{ meeting_id: string; state: "ready" | "unavailable"; detail: string } | null>(
+      "live_status",
+      { meetingId },
+    ),
 
   // transcription
   transcribeMeeting: (meetingId: string) => invoke<void>("transcribe_meeting", { meetingId }),

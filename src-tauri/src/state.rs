@@ -33,6 +33,12 @@ pub struct AppState {
     /// Managed `ollama serve` child (None when a user-run server is used or
     /// the ollama provider isn't active). Killed on app exit (ollama.rs).
     pub ollama: Mutex<Option<std::process::Child>>,
+    /// Latest `live:status` per the most recent recording. Events are
+    /// fire-and-forget, and the live loop can emit "unavailable" before the
+    /// pane has mounted its listener (fast failures at recording start) —
+    /// this snapshot lets the pane catch up on mount instead of showing an
+    /// optimistic "Listening…" forever.
+    pub live_status: Mutex<Option<crate::live::LiveStatus>>,
 }
 
 impl AppState {
@@ -71,6 +77,7 @@ impl AppState {
             screen: Mutex::new(None),
             jobs_notify: tokio::sync::Notify::new(),
             ollama: Mutex::new(None),
+            live_status: Mutex::new(None),
         })
     }
 
