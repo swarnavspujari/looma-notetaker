@@ -63,6 +63,9 @@ impl AudioCapture for CpalAudioCapture {
     }
 
     fn supports_system_loopback(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        return crate::coreaudio_tap::supported(); // process taps, 14.2+
+        #[cfg(not(target_os = "macos"))]
         cfg!(any(target_os = "windows", target_os = "linux"))
     }
 
@@ -250,11 +253,14 @@ impl ChannelRecorder {
 }
 
 /// The system-audio channel differs per OS: WASAPI loopback rides a cpal
-/// stream; Linux records the Pulse/PipeWire monitor on its own thread.
+/// stream; Linux records the Pulse/PipeWire monitor on its own thread;
+/// macOS taps every process's output via a Core Audio process tap.
 enum LoopbackChannel {
     Cpal(ChannelRecorder),
     #[cfg(target_os = "linux")]
     Pulse(crate::pulse_loopback::PulseRecorder),
+    #[cfg(target_os = "macos")]
+    CoreAudioTap(crate::coreaudio_tap::TapRecorder),
 }
 
 impl LoopbackChannel {
@@ -263,6 +269,8 @@ impl LoopbackChannel {
             LoopbackChannel::Cpal(r) => r.pad_tail_to(target_ms),
             #[cfg(target_os = "linux")]
             LoopbackChannel::Pulse(r) => r.pad_tail_to(target_ms),
+            #[cfg(target_os = "macos")]
+            LoopbackChannel::CoreAudioTap(r) => r.pad_tail_to(target_ms),
         }
     }
     fn writer(&self) -> &SharedWriter {
@@ -270,6 +278,8 @@ impl LoopbackChannel {
             LoopbackChannel::Cpal(r) => &r.writer,
             #[cfg(target_os = "linux")]
             LoopbackChannel::Pulse(r) => &r.writer,
+            #[cfg(target_os = "macos")]
+            LoopbackChannel::CoreAudioTap(r) => &r.writer,
         }
     }
     fn path(&self) -> &PathBuf {
@@ -277,6 +287,8 @@ impl LoopbackChannel {
             LoopbackChannel::Cpal(r) => &r.path,
             #[cfg(target_os = "linux")]
             LoopbackChannel::Pulse(r) => &r.path,
+            #[cfg(target_os = "macos")]
+            LoopbackChannel::CoreAudioTap(r) => &r.path,
         }
     }
     fn cpal_stream(&self) -> Option<&cpal::Stream> {
@@ -284,6 +296,8 @@ impl LoopbackChannel {
             LoopbackChannel::Cpal(r) => Some(&r._stream),
             #[cfg(target_os = "linux")]
             LoopbackChannel::Pulse(_) => None,
+            #[cfg(target_os = "macos")]
+            LoopbackChannel::CoreAudioTap(_) => None,
         }
     }
 }
@@ -457,6 +471,14 @@ fn build_loopback_channel(
     {
         return crate::pulse_loopback::PulseRecorder::start(path, clock.clone())
             .map(LoopbackChannel::Pulse);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // Core Audio process tap (14.2+). Any failure — older macOS, denied
+        // system-audio permission, aggregate refusing to build — falls back
+        // to mic-only with the existing degradation warning upstream.
+        return crate::coreaudio_tap::TapRecorder::start(path, clock.clone())
+            .map(LoopbackChannel::CoreAudioTap);
     }
     #[allow(unreachable_code)]
     Err(AudioError::LoopbackUnsupported)
